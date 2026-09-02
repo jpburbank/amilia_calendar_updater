@@ -119,6 +119,15 @@ def amilia_webhook(request: Request):
     if request.method != "POST":
         return _respond("rejected", 405, reason="method not allowed", method=request.method)
 
+    # TEMP DEBUG — remove before merging. Logs the complete, raw request Amilia
+    # sends so we can see the real payload shape in GCP Logs Explorer. Filter
+    # with: textPayload:"AMILIA_RAW_PAYLOAD"
+    logger.info(
+        "AMILIA_RAW_PAYLOAD headers=%s body=%s",
+        dict(request.headers),
+        request.get_data(as_text=True),
+    )
+
     body = request.get_json(silent=True)
     if not body:
         return _respond(
