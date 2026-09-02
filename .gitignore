@@ -1,0 +1,9 @@
+# Real deploy config, built from env.yaml.example. Not secret today, but it is
+# the file that grows secrets first.
+env.yaml
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/

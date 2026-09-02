@@ -1,0 +1,4 @@
+# Test-only. Kept out of requirements.txt so it isn't installed into the
+# function at deploy time.
+#   pip install -r requirements.txt -r requirements-dev.txt && pytest
+pytest==8.*
