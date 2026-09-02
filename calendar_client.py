@@ -11,7 +11,7 @@ Setup (done once per calendar, by that calendar's owner):
        gcloud services enable calendar-json.googleapis.com
 
   2. Find the function's runtime service account:
-       gcloud functions describe amilia-calendar-sync --gen2 --region=<REGION> \
+       gcloud functions describe amilia-calendar-updater --gen2 --region=<REGION> \
          --format='value(serviceConfig.serviceAccount)'
 
   3. In Google Calendar, open Settings for the target calendar ->

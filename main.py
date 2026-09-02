@@ -11,9 +11,9 @@ Deploy:
 
   # A dedicated identity, so the calendar grant belongs to this function
   # rather than to the project-wide default compute service account.
-  gcloud iam service-accounts create amilia-calendar-sync
+  gcloud iam service-accounts create amilia-calendar-updater
 
-  gcloud functions deploy amilia-calendar-sync \
+  gcloud functions deploy amilia-calendar-updater \
     --gen2 \
     --runtime=python312 \
     --region=<REGION> \
@@ -21,7 +21,7 @@ Deploy:
     --entry-point=amilia_webhook \
     --trigger-http \
     --no-allow-unauthenticated \
-    --service-account=amilia-calendar-sync@<PROJECT_ID>.iam.gserviceaccount.com \
+    --service-account=amilia-calendar-updater@<PROJECT_ID>.iam.gserviceaccount.com \
     --env-vars-file=env.yaml
 
 Amilia webhook contract (see /apidocs/ApiDocs/v1webhooks.html):

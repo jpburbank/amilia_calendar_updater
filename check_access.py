@@ -28,7 +28,7 @@ from googleapiclient.errors import HttpError
 
 from calendar_client import SCOPES
 
-PROBE_SUMMARY = "amilia-calendar-sync access check (safe to delete)"
+PROBE_SUMMARY = "amilia-calendar-updater access check (safe to delete)"
 
 
 def _identity(credentials) -> str:
