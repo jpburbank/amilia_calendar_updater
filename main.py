@@ -37,7 +37,7 @@ import os
 import functions_framework
 from flask import Request, jsonify
 
-from calendar_client import CalendarClient, is_retryable
+from calendar_client import CalendarClient
 from handlers import handle_facility_booking, handle_registration
 
 logging.basicConfig(level=logging.INFO)
@@ -59,18 +59,18 @@ HANDLERS = {
 #   rejected the request never looked like an Amilia webhook
 #   skipped  the handler ran but wrote nothing — a booking that is NOT on the
 #            calendar and never will be without someone noticing
-#   retry    transient or operator-fixable; Amilia will redeliver
-#   dropped  permanent failure, booking lost, no redelivery coming
+#   dropped  the handler raised — booking lost, no redelivery: we always ack
+#            with 200 so a bad booking or an outage never burns Amilia's ~72h
+#            retry budget or gets the whole subscription disabled
 #
-# Alert on `dropped`. Alert on the *rate* of `retry` and `skipped` rather than
-# on single occurrences: a sustained stream of either means the calendar share
-# broke or a handler path is unimplemented, but individually they are expected.
+# Alert on `dropped`. Alert on the *rate* of `skipped` rather than on single
+# occurrences: a sustained stream means a handler path is unimplemented, but
+# individually it's expected.
 _LOG_LEVELS = {
     "ok": logging.INFO,
     "ignored": logging.INFO,
     "rejected": logging.WARNING,
     "skipped": logging.WARNING,
-    "retry": logging.WARNING,
     "dropped": logging.ERROR,
 }
 
@@ -171,20 +171,14 @@ def amilia_webhook(request: Request):
 
 def _failure_response(context: str, action: str, org_id, exc: Exception):
     """
-    Decide whether to spend Amilia's retry budget on this failure.
-
-    retry (503): a redelivery could succeed once someone fixes the calendar
-    share or Google recovers. The retry window doubles as the window to notice
-    and fix a broken share.
-
-    dropped (200): identical redeliveries would fail identically, and 72h of
-    them costs the whole subscription. Losing one booking beats losing every
-    future one, so ack and rely on the log.
+    Always ack with 200: a redelivery of the identical request would fail
+    identically, and 72h of retries costs the whole Amilia subscription.
+    Losing one booking beats losing every future one, so ack and rely on the
+    error log (and alerting on it) to catch and fix the underlying problem.
     """
-    status = "retry" if is_retryable(exc) else "dropped"
     return _respond(
-        status,
-        503 if status == "retry" else 200,
+        "dropped",
+        200,
         exc_info=True,
         context=context,
         action=action,

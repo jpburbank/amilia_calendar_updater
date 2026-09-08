@@ -82,15 +82,20 @@ def test_handler_writing_nothing_is_skipped_not_ok(caplog, monkeypatch):
     assert "reason=no stored event mapping" in caplog.records[-1].getMessage()
 
 
-def test_unshared_calendar_asks_for_redelivery(caplog, monkeypatch):
+def test_unshared_calendar_is_dropped_at_error_level(caplog, monkeypatch):
+    """
+    Even an operator-fixable failure (calendar not shared yet) is always
+    acked with 200 rather than left for Amilia to retry.
+    """
+
     def handler(**kw):
         raise HttpError(httplib2.Response({"status": 403}), b"{}")
 
     with caplog.at_level(logging.DEBUG):
         status_code, body = call(json_body=booking(), handler=handler, monkeypatch=monkeypatch)
-    assert status_code == 503
-    assert body["status"] == "retry"
-    assert caplog.records[-1].levelno == logging.WARNING
+    assert status_code == 200
+    assert body["status"] == "dropped"
+    assert caplog.records[-1].levelno == logging.ERROR
     assert "google_status=403" in caplog.records[-1].getMessage()
 
 
@@ -108,4 +113,4 @@ def test_malformed_payload_is_dropped_at_error_level(caplog, monkeypatch):
 
 def test_every_status_has_a_log_level():
     """Guards against a new _respond() call site with no level mapped."""
-    assert set(main._LOG_LEVELS) == {"ok", "ignored", "rejected", "skipped", "retry", "dropped"}
+    assert set(main._LOG_LEVELS) == {"ok", "ignored", "rejected", "skipped", "dropped"}
