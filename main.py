@@ -145,6 +145,12 @@ def _respond(status: str, http_status: int, *, result=None, exc_info=False, **fi
 
 @functions_framework.http
 def amilia_webhook(request: Request):
+    # TEMP DEBUG — remove before merging. Unconditional, first line in the
+    # function: confirms the function was invoked at all, independent of
+    # method/body validity or anything downstream. Filter with:
+    # jsonPayload.message:"AMILIA_WEBHOOK_INVOKED"
+    logger.info("AMILIA_WEBHOOK_INVOKED method=%s", request.method)
+
     if request.method != "POST":
         return _respond("rejected", 405, reason="method not allowed", method=request.method)
 
