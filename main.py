@@ -31,8 +31,10 @@ Amilia webhook contract (see /apidocs/ApiDocs/v1webhooks.html):
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import sys
 
 import functions_framework
 from flask import Request, jsonify
@@ -40,7 +42,34 @@ from flask import Request, jsonify
 from calendar_client import CalendarClient, is_retryable
 from handlers import handle_facility_booking, handle_registration
 
-logging.basicConfig(level=logging.INFO)
+
+class _StructuredFormatter(logging.Formatter):
+    """
+    One JSON object per line, per Cloud Logging's structured-logging
+    convention: https://cloud.google.com/logging/docs/structured-logging
+
+    Plain text through logging.basicConfig() always lands in Cloud Logging
+    as severity=DEFAULT. Writing a top-level "severity" field instead gets
+    it parsed into the LogEntry's actual severity, which is what the
+    "Alert on `dropped`" logging strategy below depends on.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {"severity": record.levelname, "message": record.getMessage()}
+        if record.exc_info:
+            payload["message"] += "\n" + self.formatException(record.exc_info)
+        return json.dumps(payload)
+
+
+def _configure_logging() -> None:
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(_StructuredFormatter())
+    root = logging.getLogger()
+    root.handlers = [handler]
+    root.setLevel(logging.INFO)
+
+
+_configure_logging()
 logger = logging.getLogger(__name__)
 
 CALENDAR_ID = os.environ["GOOGLE_CALENDAR_ID"]
@@ -99,7 +128,7 @@ def _respond(status: str, http_status: int, *, result=None, exc_info=False, **fi
 
     Emits one `key=value` line per request, e.g.
         status=skipped context=FacilityBooking action=Update reason=no stored event mapping
-    which Cloud Logging filters as textPayload:"status=skipped".
+    which Cloud Logging filters as jsonPayload.message:"status=skipped".
     """
     fields = {"status": status, **{k: v for k, v in fields.items() if v is not None}}
     logger.log(
