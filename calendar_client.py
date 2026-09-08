@@ -29,45 +29,12 @@ from __future__ import annotations
 from typing import Optional
 
 import google.auth
-import google.auth.exceptions
-import httplib2
 from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
 
 # Narrowest scope that covers create/patch/delete on a calendar shared with
 # us. Deliberately not the full "calendar" scope, which would also permit
 # creating calendars and rewriting sharing rules.
 SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
-
-# Statuses worth asking Amilia to redeliver for. 403 and 404 are in here
-# because under this auth model they are the expected symptom of "the
-# calendar has not been shared with us yet" or "the share was revoked" —
-# operator-fixable, and Amilia's retry window is the grace period to fix
-# them and have the missed bookings land on their own.
-RETRYABLE_STATUSES = frozenset({403, 404, 429, 500, 502, 503, 504})
-
-_TRANSPORT_ERRORS = (
-    google.auth.exceptions.TransportError,
-    httplib2.HttpLib2Error,
-    ConnectionError,
-    TimeoutError,
-)
-
-
-def is_retryable(exc: BaseException) -> bool:
-    """
-    Whether redelivering the webhook could plausibly succeed.
-
-    Anything else — a 400 from Google, a missing field in the payload, a bug
-    in a handler — produces the identical failure on every redelivery, and
-    Amilia disables a subscription after ~72h of failures. Those must be
-    acked and alerted on instead of retried.
-    """
-    if isinstance(exc, HttpError):
-        return exc.resp.status in RETRYABLE_STATUSES
-    if isinstance(exc, _TRANSPORT_ERRORS):
-        return True
-    return False
 
 
 class CalendarClient:
