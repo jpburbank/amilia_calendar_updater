@@ -21,8 +21,9 @@ def handle_facility_booking(action: str, payload: dict, calendar_client: Calenda
     reservation_id = payload.get("ReservationId")
 
     if action == "Create":
+        title = payload.get("Title", "Facility Booking")
         event = calendar_client.create_event(
-            summary=payload.get("Title", "Facility Booking"),
+            summary=f"{title} booking",
             start_iso=payload["Start"],
             end_iso=payload["End"],
             location=(payload.get("Location") or {}).get("Name"),
