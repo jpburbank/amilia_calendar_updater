@@ -11,6 +11,24 @@ A Cloud Function deployment has the following requirements.
 2. A logged in account to the GCP project that the Function is being deployed to
 3. The permissions to be able to deploy and start a Cloud Function
 
+### Storage bucket setup
+The event-ID mapping store (see `event_store.py`) needs a bucket, an IAM binding for the
+function's service account, and a retention lifecycle applied — do this once, before deploying,
+and again only if the retention window in `lifecycle.json` changes.
+
+```
+gcloud storage buckets create gs://cm-calendar-506017-amilia-calendar-event-mappings \
+    --location=us-west1 --uniform-bucket-level-access
+
+gcloud storage buckets add-iam-policy-binding \
+    gs://cm-calendar-506017-amilia-calendar-event-mappings \
+    --member="serviceAccount:amilia-calendar-updater@cm-calendar-506017.iam.gserviceaccount.com" \
+    --role="roles/storage.objectAdmin"
+
+gcloud storage buckets update gs://cm-calendar-506017-amilia-calendar-event-mappings \
+    --lifecycle-file=lifecycle.json
+```
+
 ### CLI
 In the root of the project run the following on the command line
 .

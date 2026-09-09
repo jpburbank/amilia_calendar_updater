@@ -13,6 +13,10 @@ Deploy:
   # rather than to the project-wide default compute service account.
   gcloud iam service-accounts create amilia-calendar-updater
 
+  # The event-ID mapping bucket must exist, be IAM-bound to the service
+  # account above, and have its retention lifecycle applied before the
+  # function is deployed. See event_store.py for the exact commands.
+
   gcloud functions deploy amilia-calendar-updater \
     --gen2 \
     --runtime=python312 \
@@ -40,7 +44,8 @@ import functions_framework
 from flask import Request, jsonify
 
 from calendar_client import CalendarClient
-from handlers import handle_facility_booking, handle_registration
+from event_store import EventStore
+from handlers import handle_facility_booking
 
 
 class _StructuredFormatter(logging.Formatter):
@@ -73,11 +78,13 @@ _configure_logging()
 logger = logging.getLogger(__name__)
 
 CALENDAR_ID = os.environ["GOOGLE_CALENDAR_ID"]
+EVENT_STORE_BUCKET = os.environ["GOOGLE_EVENT_STORE_BUCKET"]
 
-# Route by (Context) -> handler function. Each handler takes (action, payload, calendar_client).
+# Route by (Context) -> handler function. Each handler takes (action, payload,
+# calendar_client, event_store). Contexts not listed here (e.g. Registration,
+# ignored for now) fall through to the "ignored" 200 response below.
 HANDLERS = {
     "FacilityBooking": handle_facility_booking,
-    "Registration": handle_registration,
 }
 
 # Every response carries one of these statuses, and each is logged at a level
@@ -104,6 +111,7 @@ _LOG_LEVELS = {
 }
 
 _calendar_client: CalendarClient | None = None
+_event_store: EventStore | None = None
 
 
 def _get_calendar_client() -> CalendarClient:
@@ -120,6 +128,14 @@ def _get_calendar_client() -> CalendarClient:
     if _calendar_client is None:
         _calendar_client = CalendarClient(calendar_id=CALENDAR_ID)
     return _calendar_client
+
+
+def _get_event_store() -> EventStore:
+    """One store per instance, built lazily — see _get_calendar_client()."""
+    global _event_store
+    if _event_store is None:
+        _event_store = EventStore(bucket_name=EVENT_STORE_BUCKET)
+    return _event_store
 
 
 def _respond(status: str, http_status: int, *, result=None, exc_info=False, **fields):
@@ -169,14 +185,19 @@ def amilia_webhook(request: Request):
         return _respond("ignored", 200, context=context, organization_id=org_id)
 
     try:
-        result = handler(action=action, payload=payload, calendar_client=_get_calendar_client())
+        result = handler(
+            action=action,
+            payload=payload,
+            calendar_client=_get_calendar_client(),
+            event_store=_get_event_store(),
+        )
     except Exception as exc:
         return _failure_response(context, action, org_id, exc)
 
     if "skipped" in result:
-        # The handler ran cleanly but nothing reached the calendar. With the
-        # event-ID store still stubbed out this is the common path for Update
-        # and Delete, and it must not read as success in the logs.
+        # The handler ran cleanly but nothing reached the calendar — e.g. an
+        # Update/Delete for a booking with no stored event mapping. Must not
+        # read as success in the logs.
         return _respond(
             "skipped",
             200,
