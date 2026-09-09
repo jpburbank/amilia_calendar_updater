@@ -1,5 +1,7 @@
 # GCS-backed event-ID mapping store
 
+> **Update (post-implementation):** the bucket, its IAM binding, and its retention lifecycle rule described below as manual `gcloud` commands / a checked-in `lifecycle.json` were superseded by Terraform, managed in the sibling `amilia_calendar_updater_gcp_resources` project (`storage.tf`). The design rationale below (object naming, granularity, Custom-Time-based retention) is unchanged — only how the bucket is provisioned moved.
+
 ## Context
 
 `handlers.py` can create Google Calendar events for `FacilityBooking` webhooks, but Update and Delete don't work: there's no persistence layer mapping Amilia's `ReservationId` to the Google Calendar `event_id` that was created for it. A stub, `_lookup_event_id()`, always returns `None`, so every Update/Delete just no-ops with `"skipped": "no stored event mapping"`.

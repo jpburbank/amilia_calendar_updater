@@ -7,25 +7,14 @@ Auth model: the same Cloud Function runtime service account already used by
 CalendarClient, via Application Default Credentials. Unlike Calendar there
 is no separate "sharing" step — IAM grants access to the bucket directly.
 
-Setup (done once per project):
+Setup: the bucket, its IAM binding to the function's runtime service account,
+and its retention lifecycle rule are all Terraform-managed in the sibling
+amilia_calendar_updater_gcp_resources project (storage.tf) — run
+`terraform apply` there before deploying this function. The bucket name is
+exposed as that project's `amilia_calendar_event_mappings_bucket` output;
+set it as GOOGLE_EVENT_STORE_BUCKET here.
 
-  1. Create the bucket (uniform bucket-level access, matching the
-     function's region):
-       gcloud storage buckets create gs://<PROJECT_ID>-amilia-calendar-event-mappings \
-         --location=<REGION> --uniform-bucket-level-access
-
-  2. Grant the function's runtime service account object-level access,
-     scoped to just this bucket:
-       gcloud storage buckets add-iam-policy-binding \
-         gs://<PROJECT_ID>-amilia-calendar-event-mappings \
-         --member="serviceAccount:amilia-calendar-updater@<PROJECT_ID>.iam.gserviceaccount.com" \
-         --role="roles/storage.objectAdmin"
-
-  3. Apply the retention policy (see lifecycle.json in the repo root):
-       gcloud storage buckets update gs://<PROJECT_ID>-amilia-calendar-event-mappings \
-         --lifecycle-file=lifecycle.json
-
-  4. Verify:  GOOGLE_EVENT_STORE_BUCKET=... python check_storage_access.py
+Verify access once the bucket exists:  GOOGLE_EVENT_STORE_BUCKET=... python check_storage_access.py
 
 No Cloud Storage API to enable — it's on by default for every project.
 
@@ -36,11 +25,12 @@ FacilityBooking and Registration), so a flat scheme risks collisions the
 moment a second context (e.g. Activity) is wired up.
 
 Each object's Custom-Time metadata is set to the underlying event's end
-time, so a bucket-wide lifecycle rule can expire mappings a fixed number of
-days after the *event* has passed, not after the object was last written —
-see lifecycle.json. Custom-Time can only increase once set (a GCS
-constraint), so set() takes the max of any existing Custom-Time and the
-new end time, ensuring an expiry date is never pulled earlier.
+time, so the bucket's lifecycle rule (storage.tf, in the Terraform project
+above) can expire mappings a fixed number of days after the *event* has
+passed, not after the object was last written. Custom-Time can only
+increase once set (a GCS constraint), so set() takes the max of any
+existing Custom-Time and the new end time, ensuring an expiry date is
+never pulled earlier.
 """
 
 from __future__ import annotations

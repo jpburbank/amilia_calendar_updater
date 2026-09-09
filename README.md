@@ -13,21 +13,11 @@ A Cloud Function deployment has the following requirements.
 
 ### Storage bucket setup
 The event-ID mapping store (see `event_store.py`) needs a bucket, an IAM binding for the
-function's service account, and a retention lifecycle applied — do this once, before deploying,
-and again only if the retention window in `lifecycle.json` changes.
-
-```
-gcloud storage buckets create gs://cm-calendar-506017-amilia-calendar-event-mappings \
-    --location=us-west1 --uniform-bucket-level-access
-
-gcloud storage buckets add-iam-policy-binding \
-    gs://cm-calendar-506017-amilia-calendar-event-mappings \
-    --member="serviceAccount:amilia-calendar-updater@cm-calendar-506017.iam.gserviceaccount.com" \
-    --role="roles/storage.objectAdmin"
-
-gcloud storage buckets update gs://cm-calendar-506017-amilia-calendar-event-mappings \
-    --lifecycle-file=lifecycle.json
-```
+function's service account, and a retention lifecycle applied. This is Terraform-managed in the
+sibling `amilia_calendar_updater_gcp_resources` project (`storage.tf`) — run `terraform apply`
+there before deploying this function, or after changing the retention window
+(`event_mapping_retention_days` variable, default 90 days). The bucket name is exposed as the
+`amilia_calendar_event_mappings_bucket` output for `GOOGLE_EVENT_STORE_BUCKET` in `env.yaml`.
 
 ### CLI
 In the root of the project run the following on the command line

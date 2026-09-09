@@ -9,13 +9,12 @@ check_access.py to verify them.
 Deploy:
   gcloud services enable calendar-json.googleapis.com
 
-  # A dedicated identity, so the calendar grant belongs to this function
-  # rather than to the project-wide default compute service account.
-  gcloud iam service-accounts create amilia-calendar-updater
-
-  # The event-ID mapping bucket must exist, be IAM-bound to the service
-  # account above, and have its retention lifecycle applied before the
-  # function is deployed. See event_store.py for the exact commands.
+  # The runtime service account (a dedicated identity, so the calendar grant
+  # belongs to this function rather than the project-wide default compute
+  # service account) and the event-ID mapping bucket, with its IAM binding
+  # and retention lifecycle, are Terraform-managed in the sibling
+  # amilia_calendar_updater_gcp_resources project — run `terraform apply`
+  # there first.
 
   gcloud functions deploy amilia-calendar-updater \
     --gen2 \
