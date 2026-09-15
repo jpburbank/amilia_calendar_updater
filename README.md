@@ -11,6 +11,14 @@ A Cloud Function deployment has the following requirements.
 2. A logged in account to the GCP project that the Function is being deployed to
 3. The permissions to be able to deploy and start a Cloud Function
 
+### Storage bucket setup
+The event-ID mapping store (see `event_store.py`) needs a bucket, an IAM binding for the
+function's service account, and a retention lifecycle applied. This is Terraform-managed in the
+sibling `amilia_calendar_updater_gcp_resources` project (`storage.tf`) — run `terraform apply`
+there before deploying this function, or after changing the retention window
+(`event_mapping_retention_days` variable, default 90 days). The bucket name is exposed as the
+`amilia_calendar_event_mappings_bucket` output for `GOOGLE_EVENT_STORE_BUCKET` in `env.yaml`.
+
 ### Webhook token setup
 Amilia has no webhook-signing mechanism, so requests are authenticated by a shared-secret token
 instead (checked first thing in `amilia_webhook`). The token is Terraform-managed in the sibling
