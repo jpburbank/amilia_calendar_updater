@@ -9,8 +9,9 @@ from flask import Flask, request
 from googleapiclient.errors import HttpError
 
 os.environ.setdefault("GOOGLE_CALENDAR_ID", "test-calendar@group.calendar.google.com")
+os.environ.setdefault("GOOGLE_EVENT_STORE_BUCKET", "test-bucket")
 
-import main  # noqa: E402  (import needs GOOGLE_CALENDAR_ID set)
+import main  # noqa: E402  (import needs GOOGLE_CALENDAR_ID/GOOGLE_EVENT_STORE_BUCKET set)
 
 app = Flask(__name__)
 
@@ -19,6 +20,7 @@ app = Flask(__name__)
 def no_real_credentials(monkeypatch):
     """Keep the tests off the metadata server."""
     monkeypatch.setattr(main, "_get_calendar_client", lambda: object())
+    monkeypatch.setattr(main, "_get_event_store", lambda: object())
 
 
 def call(method="POST", json_body=None, handler=None, monkeypatch=None):
@@ -53,6 +55,15 @@ def test_unparseable_body_is_rejected(caplog):
 def test_unknown_context_is_ignored(caplog):
     with caplog.at_level(logging.DEBUG):
         status_code, body = call(json_body={"Context": "Membership", "Action": "Create"})
+    assert status_code == 200
+    assert body["status"] == "ignored"
+    assert caplog.records[-1].levelno == logging.INFO
+
+
+def test_registration_context_is_ignored(caplog):
+    """Registration webhooks are deliberately not synced (for now)."""
+    with caplog.at_level(logging.DEBUG):
+        status_code, body = call(json_body={"Context": "Registration", "Action": "Create"})
     assert status_code == 200
     assert body["status"] == "ignored"
     assert caplog.records[-1].levelno == logging.INFO
