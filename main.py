@@ -13,6 +13,16 @@ Deploy:
   # rather than to the project-wide default compute service account.
   gcloud iam service-accounts create amilia-calendar-updater
 
+  # Amilia has no webhook-signing mechanism, so requests are authenticated
+  # by a shared-secret token instead (see the check at the top of
+  # amilia_webhook). The token lives in Secret Manager, provisioned by the
+  # sibling amilia_calendar_updater_gcp_resources Terraform project — run
+  # `terraform apply` there first, then mount it as an env var at deploy:
+  #   --set-secrets="AMILIA_WEBHOOK_TOKEN=amilia-webhook-token:latest"
+  # Register the webhook with Amilia at this function's URL with the token
+  # appended as a query param, e.g. "?token=<value>" — fetch the value with:
+  #   gcloud secrets versions access latest --secret=amilia-webhook-token
+
   gcloud functions deploy amilia-calendar-updater \
     --gen2 \
     --runtime=python312 \
@@ -20,9 +30,10 @@ Deploy:
     --source=. \
     --entry-point=amilia_webhook \
     --trigger-http \
-    --no-allow-unauthenticated \
+    --allow-unauthenticated \
     --service-account=amilia-calendar-updater@<PROJECT_ID>.iam.gserviceaccount.com \
-    --env-vars-file=env.yaml
+    --env-vars-file=env.yaml \
+    --set-secrets="AMILIA_WEBHOOK_TOKEN=amilia-webhook-token:latest"
 
 Amilia webhook contract (see /apidocs/ApiDocs/v1webhooks.html):
   POST body: { "OrganizationId", "Context", "Action", "Name", "EventTime", "Payload": {...} }
@@ -31,6 +42,7 @@ Amilia webhook contract (see /apidocs/ApiDocs/v1webhooks.html):
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import os
@@ -73,6 +85,7 @@ _configure_logging()
 logger = logging.getLogger(__name__)
 
 CALENDAR_ID = os.environ["GOOGLE_CALENDAR_ID"]
+WEBHOOK_TOKEN = os.environ["AMILIA_WEBHOOK_TOKEN"]
 
 # Route by (Context) -> handler function. Each handler takes (action, payload, calendar_client).
 HANDLERS = {
@@ -145,6 +158,14 @@ def _respond(status: str, http_status: int, *, result=None, exc_info=False, **fi
 
 @functions_framework.http
 def amilia_webhook(request: Request):
+    # Amilia has no webhook-signing mechanism, so the shared secret travels
+    # as a query param on the URL registered with Amilia rather than a
+    # header. Checked first, before any other work, so a forged request
+    # never reaches JSON parsing or a handler. compare_digest avoids a
+    # timing side-channel that could let an attacker infer the token.
+    if not hmac.compare_digest(request.args.get("token", ""), WEBHOOK_TOKEN):
+        return _respond("rejected", 403, reason="invalid or missing token")
+
     if request.method != "POST":
         return _respond("rejected", 405, reason="method not allowed", method=request.method)
 

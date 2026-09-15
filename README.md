@@ -11,6 +11,16 @@ A Cloud Function deployment has the following requirements.
 2. A logged in account to the GCP project that the Function is being deployed to
 3. The permissions to be able to deploy and start a Cloud Function
 
+### Webhook token setup
+Amilia has no webhook-signing mechanism, so requests are authenticated by a shared-secret token
+instead (checked first thing in `amilia_webhook`). The token is Terraform-managed in the sibling
+`amilia_calendar_updater_gcp_resources` project (`secrets.tf`) — run `terraform apply` there
+before deploying. Register the webhook with Amilia using this function's URL with the token
+appended as a query param, e.g. `?token=<value>`, fetched with:
+```
+gcloud secrets versions access latest --secret=amilia-webhook-token
+```
+
 ### CLI
 In the root of the project run the following on the command line
 .
@@ -18,5 +28,6 @@ In the root of the project run the following on the command line
 gcloud functions deploy amilia-calendar-updater --gen2 --runtime=python312 --region=us-west1 \
     --source=. --entry-point=amilia_webhook --trigger-http --allow-unauthenticated \
     --service-account=amilia-calendar-updater@cm-calendar-506017.iam.gserviceaccount.com \
-    --env-vars-file=env.yaml
+    --env-vars-file=env.yaml \
+    --set-secrets="AMILIA_WEBHOOK_TOKEN=amilia-webhook-token:latest"
 ```
