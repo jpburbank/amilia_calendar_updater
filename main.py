@@ -9,9 +9,22 @@ check_access.py to verify them.
 Deploy:
   gcloud services enable calendar-json.googleapis.com
 
-  # A dedicated identity, so the calendar grant belongs to this function
-  # rather than to the project-wide default compute service account.
-  gcloud iam service-accounts create amilia-calendar-updater
+  # The runtime service account (a dedicated identity, so the calendar grant
+  # belongs to this function rather than the project-wide default compute
+  # service account) and the event-ID mapping bucket, with its IAM binding
+  # and retention lifecycle, are Terraform-managed in the sibling
+  # amilia_calendar_updater_gcp_resources project — run `terraform apply`
+  # there first.
+
+  # Amilia has no webhook-signing mechanism, so requests are authenticated
+  # by a shared-secret token instead (see the check at the top of
+  # amilia_webhook). The token lives in Secret Manager, provisioned by the
+  # sibling amilia_calendar_updater_gcp_resources Terraform project — run
+  # `terraform apply` there first, then mount it as an env var at deploy:
+  #   --set-secrets="AMILIA_WEBHOOK_TOKEN=amilia-webhook-token:latest"
+  # Register the webhook with Amilia at this function's URL with the token
+  # appended as a query param, e.g. "?token=<value>" — fetch the value with:
+  #   gcloud secrets versions access latest --secret=amilia-webhook-token
 
   gcloud functions deploy amilia-calendar-updater \
     --gen2 \
@@ -20,9 +33,10 @@ Deploy:
     --source=. \
     --entry-point=amilia_webhook \
     --trigger-http \
-    --no-allow-unauthenticated \
+    --allow-unauthenticated \
     --service-account=amilia-calendar-updater@<PROJECT_ID>.iam.gserviceaccount.com \
-    --env-vars-file=env.yaml
+    --env-vars-file=env.yaml \
+    --set-secrets="AMILIA_WEBHOOK_TOKEN=amilia-webhook-token:latest"
 
 Amilia webhook contract (see /apidocs/ApiDocs/v1webhooks.html):
   POST body: { "OrganizationId", "Context", "Action", "Name", "EventTime", "Payload": {...} }
@@ -31,6 +45,7 @@ Amilia webhook contract (see /apidocs/ApiDocs/v1webhooks.html):
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import os
@@ -40,7 +55,8 @@ import functions_framework
 from flask import Request, jsonify
 
 from calendar_client import CalendarClient
-from handlers import handle_facility_booking, handle_registration
+from event_store import EventStore
+from handlers import handle_facility_booking
 
 
 class _StructuredFormatter(logging.Formatter):
@@ -73,11 +89,14 @@ _configure_logging()
 logger = logging.getLogger(__name__)
 
 CALENDAR_ID = os.environ["GOOGLE_CALENDAR_ID"]
+EVENT_STORE_BUCKET = os.environ["GOOGLE_EVENT_STORE_BUCKET"]
+WEBHOOK_TOKEN = os.environ["AMILIA_WEBHOOK_TOKEN"]
 
-# Route by (Context) -> handler function. Each handler takes (action, payload, calendar_client).
+# Route by (Context) -> handler function. Each handler takes (action, payload,
+# calendar_client, event_store). Contexts not listed here (e.g. Registration,
+# ignored for now) fall through to the "ignored" 200 response below.
 HANDLERS = {
     "FacilityBooking": handle_facility_booking,
-    "Registration": handle_registration,
 }
 
 # Every response carries one of these statuses, and each is logged at a level
@@ -104,6 +123,7 @@ _LOG_LEVELS = {
 }
 
 _calendar_client: CalendarClient | None = None
+_event_store: EventStore | None = None
 
 
 def _get_calendar_client() -> CalendarClient:
@@ -120,6 +140,14 @@ def _get_calendar_client() -> CalendarClient:
     if _calendar_client is None:
         _calendar_client = CalendarClient(calendar_id=CALENDAR_ID)
     return _calendar_client
+
+
+def _get_event_store() -> EventStore:
+    """One store per instance, built lazily — see _get_calendar_client()."""
+    global _event_store
+    if _event_store is None:
+        _event_store = EventStore(bucket_name=EVENT_STORE_BUCKET)
+    return _event_store
 
 
 def _respond(status: str, http_status: int, *, result=None, exc_info=False, **fields):
@@ -145,10 +173,18 @@ def _respond(status: str, http_status: int, *, result=None, exc_info=False, **fi
 
 @functions_framework.http
 def amilia_webhook(request: Request):
-    # TEMP DEBUG — remove before merging. Unconditional, first line in the
-    # function: confirms the function was invoked at all, independent of
-    # method/body validity or anything downstream. Filter with:
-    # jsonPayload.message:"AMILIA_WEBHOOK_INVOKED"
+    # Amilia has no webhook-signing mechanism, so the shared secret travels
+    # as a query param on the URL registered with Amilia rather than a
+    # header. Checked first, before any other work, so a forged request
+    # never reaches JSON parsing or a handler. compare_digest avoids a
+    # timing side-channel that could let an attacker infer the token.
+    if not hmac.compare_digest(request.args.get("token", ""), WEBHOOK_TOKEN):
+        return _respond("rejected", 403, reason="invalid or missing token")
+
+    # TEMP DEBUG — remove before merging. First thing after the auth check:
+    # confirms the function was invoked (with a valid token) at all,
+    # independent of method/body validity or anything downstream. Filter
+    # with: jsonPayload.message:"AMILIA_WEBHOOK_INVOKED"
     logger.info("AMILIA_WEBHOOK_INVOKED method=%s", request.method)
 
     if request.method != "POST":
@@ -184,14 +220,19 @@ def amilia_webhook(request: Request):
         return _respond("ignored", 200, context=context, organization_id=org_id)
 
     try:
-        result = handler(action=action, payload=payload, calendar_client=_get_calendar_client())
+        result = handler(
+            action=action,
+            payload=payload,
+            calendar_client=_get_calendar_client(),
+            event_store=_get_event_store(),
+        )
     except Exception as exc:
         return _failure_response(context, action, org_id, exc)
 
     if "skipped" in result:
-        # The handler ran cleanly but nothing reached the calendar. With the
-        # event-ID store still stubbed out this is the common path for Update
-        # and Delete, and it must not read as success in the logs.
+        # The handler ran cleanly but nothing reached the calendar — e.g. an
+        # Update/Delete for a booking with no stored event mapping. Must not
+        # read as success in the logs.
         return _respond(
             "skipped",
             200,

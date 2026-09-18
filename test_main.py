@@ -9,8 +9,10 @@ from flask import Flask, request
 from googleapiclient.errors import HttpError
 
 os.environ.setdefault("GOOGLE_CALENDAR_ID", "test-calendar@group.calendar.google.com")
+os.environ.setdefault("GOOGLE_EVENT_STORE_BUCKET", "test-bucket")
+os.environ.setdefault("AMILIA_WEBHOOK_TOKEN", "test-token")
 
-import main  # noqa: E402  (import needs GOOGLE_CALENDAR_ID set)
+import main  # noqa: E402  (import needs the env vars above set)
 
 app = Flask(__name__)
 
@@ -19,19 +21,42 @@ app = Flask(__name__)
 def no_real_credentials(monkeypatch):
     """Keep the tests off the metadata server."""
     monkeypatch.setattr(main, "_get_calendar_client", lambda: object())
+    monkeypatch.setattr(main, "_get_event_store", lambda: object())
 
 
-def call(method="POST", json_body=None, handler=None, monkeypatch=None):
-    """Invoke the webhook, returning (status_code, body, handler_arg_seen)."""
+def call(method="POST", json_body=None, handler=None, monkeypatch=None, token="test-token"):
+    """
+    Invoke the webhook, returning (status_code, body).
+
+    Defaults to a valid token so every test exercises the behavior it's
+    named for, not the token check — token=None omits it entirely, and any
+    other value tests the check itself.
+    """
     if handler is not None:
         monkeypatch.setitem(main.HANDLERS, "FacilityBooking", handler)
-    with app.test_request_context(method=method, json=json_body):
+    query_string = {"token": token} if token is not None else {}
+    with app.test_request_context(method=method, json=json_body, query_string=query_string):
         response, status_code = main.amilia_webhook(request)
         return status_code, response.get_json()
 
 
 def booking(action="Create"):
     return {"OrganizationId": 42, "Context": "FacilityBooking", "Action": action, "Payload": {}}
+
+
+def test_missing_token_is_rejected(caplog):
+    with caplog.at_level(logging.DEBUG):
+        status_code, body = call(json_body=booking(), token=None)
+    assert status_code == 403
+    assert body["status"] == "rejected"
+    assert caplog.records[-1].levelno == logging.WARNING
+
+
+def test_wrong_token_is_rejected(caplog):
+    with caplog.at_level(logging.DEBUG):
+        status_code, body = call(json_body=booking(), token="not-the-right-token")
+    assert status_code == 403
+    assert body["status"] == "rejected"
 
 
 def test_non_post_is_rejected(caplog):
@@ -53,6 +78,15 @@ def test_unparseable_body_is_rejected(caplog):
 def test_unknown_context_is_ignored(caplog):
     with caplog.at_level(logging.DEBUG):
         status_code, body = call(json_body={"Context": "Membership", "Action": "Create"})
+    assert status_code == 200
+    assert body["status"] == "ignored"
+    assert caplog.records[-1].levelno == logging.INFO
+
+
+def test_registration_context_is_ignored(caplog):
+    """Registration webhooks are deliberately not synced (for now)."""
+    with caplog.at_level(logging.DEBUG):
+        status_code, body = call(json_body={"Context": "Registration", "Action": "Create"})
     assert status_code == 200
     assert body["status"] == "ignored"
     assert caplog.records[-1].levelno == logging.INFO
