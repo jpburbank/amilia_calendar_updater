@@ -26,6 +26,20 @@ Deploy:
   # appended as a query param, e.g. "?token=<value>" — fetch the value with:
   #   gcloud secrets versions access latest --secret=amilia-webhook-token
 
+  # Program/Activity sync needs three more things, all set up by the same
+  # Terraform project — see amilia_client.py, reconcile_queue.py, and
+  # reconcile_worker.py:
+  #   1. A dedicated Amilia user for REST API access (occurrence data the
+  #      webhooks don't carry). Terraform creates the amilia-api-username /
+  #      amilia-api-password secret *containers* only — set the real values
+  #      manually (see secrets.tf's comment) before deploying.
+  #   2. The Cloud Tasks queue used to fan out Program visibility flips.
+  #   3. reconcile_worker.py deployed as its own Cloud Function
+  #      (amilia-activity-reconciler, --no-allow-unauthenticated — see its
+  #      own module docstring for that deploy command) *before* this
+  #      function's first deploy, since RECONCILE_WORKER_URL below needs
+  #      its URL.
+
   gcloud functions deploy amilia-calendar-updater \
     --gen2 \
     --runtime=python312 \
@@ -36,7 +50,7 @@ Deploy:
     --allow-unauthenticated \
     --service-account=amilia-calendar-updater@<PROJECT_ID>.iam.gserviceaccount.com \
     --env-vars-file=env.yaml \
-    --set-secrets="AMILIA_WEBHOOK_TOKEN=amilia-webhook-token:latest"
+    --set-secrets="AMILIA_WEBHOOK_TOKEN=amilia-webhook-token:latest,AMILIA_API_USERNAME=amilia-api-username:latest,AMILIA_API_PASSWORD=amilia-api-password:latest"
 
 Amilia webhook contract (see /apidocs/ApiDocs/v1webhooks.html):
   POST body: { "OrganizationId", "Context", "Action", "Name", "EventTime", "Payload": {...} }
@@ -54,9 +68,11 @@ import sys
 import functions_framework
 from flask import Request, jsonify
 
+from amilia_client import AmiliaClient
 from calendar_client import CalendarClient
 from event_store import EventStore
-from handlers import handle_facility_booking
+from handlers import handle_activity, handle_facility_booking, handle_program
+from reconcile_queue import ReconcileQueue
 
 
 class _StructuredFormatter(logging.Formatter):
@@ -91,12 +107,25 @@ logger = logging.getLogger(__name__)
 CALENDAR_ID = os.environ["GOOGLE_CALENDAR_ID"]
 EVENT_STORE_BUCKET = os.environ["GOOGLE_EVENT_STORE_BUCKET"]
 WEBHOOK_TOKEN = os.environ["AMILIA_WEBHOOK_TOKEN"]
+AMILIA_API_USERNAME = os.environ["AMILIA_API_USERNAME"]
+AMILIA_API_PASSWORD = os.environ["AMILIA_API_PASSWORD"]
+GCP_PROJECT_ID = os.environ["GCP_PROJECT_ID"]
+RECONCILE_QUEUE_ID = os.environ["RECONCILE_QUEUE_ID"]
+RECONCILE_WORKER_URL = os.environ["RECONCILE_WORKER_URL"]
 
-# Route by (Context) -> handler function. Each handler takes (action, payload,
-# calendar_client, event_store). Contexts not listed here (e.g. Registration,
+# Fixed for this whole project — see README.md / the sibling Terraform repo.
+_REGION = "us-west1"
+_SERVICE_ACCOUNT_EMAIL = f"amilia-calendar-updater@{GCP_PROJECT_ID}.iam.gserviceaccount.com"
+
+# Route by (Context) -> handler function. Each handler is called with the
+# same full set of keyword arguments (action, payload, calendar_client,
+# event_store, org_id, amilia_client, task_queue) and absorbs whichever it
+# doesn't need via **_ignored. Contexts not listed here (e.g. Registration,
 # ignored for now) fall through to the "ignored" 200 response below.
 HANDLERS = {
     "FacilityBooking": handle_facility_booking,
+    "Program": handle_program,
+    "Activity": handle_activity,
 }
 
 # Every response carries one of these statuses, and each is logged at a level
@@ -124,6 +153,8 @@ _LOG_LEVELS = {
 
 _calendar_client: CalendarClient | None = None
 _event_store: EventStore | None = None
+_amilia_client: AmiliaClient | None = None
+_task_queue: ReconcileQueue | None = None
 
 
 def _get_calendar_client() -> CalendarClient:
@@ -148,6 +179,28 @@ def _get_event_store() -> EventStore:
     if _event_store is None:
         _event_store = EventStore(bucket_name=EVENT_STORE_BUCKET)
     return _event_store
+
+
+def _get_amilia_client() -> AmiliaClient:
+    """One client per instance, built lazily — see _get_calendar_client()."""
+    global _amilia_client
+    if _amilia_client is None:
+        _amilia_client = AmiliaClient(username=AMILIA_API_USERNAME, password=AMILIA_API_PASSWORD)
+    return _amilia_client
+
+
+def _get_task_queue() -> ReconcileQueue:
+    """One client per instance, built lazily — see _get_calendar_client()."""
+    global _task_queue
+    if _task_queue is None:
+        _task_queue = ReconcileQueue(
+            project_id=GCP_PROJECT_ID,
+            location=_REGION,
+            queue_id=RECONCILE_QUEUE_ID,
+            worker_url=RECONCILE_WORKER_URL,
+            invoker_service_account=_SERVICE_ACCOUNT_EMAIL,
+        )
+    return _task_queue
 
 
 def _respond(status: str, http_status: int, *, result=None, exc_info=False, **fields):
@@ -210,6 +263,9 @@ def amilia_webhook(request: Request):
             payload=payload,
             calendar_client=_get_calendar_client(),
             event_store=_get_event_store(),
+            org_id=org_id,
+            amilia_client=_get_amilia_client(),
+            task_queue=_get_task_queue(),
         )
     except Exception as exc:
         return _failure_response(context, action, org_id, exc)

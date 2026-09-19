@@ -1,8 +1,7 @@
 """Tests for EventStore, against a fake storage.Client-shaped object."""
 
-from datetime import datetime, timezone
+from datetime import datetime
 
-import pytest
 from google.api_core.exceptions import NotFound
 
 from event_store import EventStore
@@ -40,6 +39,9 @@ class _FakeBucket:
     def blob(self, name):
         return _FakeBlob(self, name)
 
+    def list_blobs(self, prefix):
+        return [_FakeBlob(self, name) for name in self.objects if name.startswith(prefix)]
+
 
 class _FakeClient:
     def __init__(self):
@@ -49,12 +51,14 @@ class _FakeClient:
         return self._bucket
 
 
-def test_set_then_get_round_trips_event_id():
+def test_set_then_get_round_trips_fields():
     store = EventStore(bucket_name="test-bucket", client=_FakeClient())
 
-    store.set("FacilityBooking", "FB-1", "evt_123", action="Create", end_iso="2026-01-01T11:00:00")
+    store.set("FacilityBooking", "FB-1", {"calendar_event_id": "evt_123", "action": "Create"})
 
-    assert store.get("FacilityBooking", "FB-1") == "evt_123"
+    doc = store.get("FacilityBooking", "FB-1")
+    assert doc["calendar_event_id"] == "evt_123"
+    assert doc["action"] == "Create"
 
 
 def test_get_on_missing_key_returns_none():
@@ -69,21 +73,60 @@ def test_delete_on_missing_key_does_not_raise():
     store.delete("FacilityBooking", "FB-missing")  # must not raise
 
 
-def test_delete_removes_the_mapping():
+def test_delete_removes_the_document():
     store = EventStore(bucket_name="test-bucket", client=_FakeClient())
-    store.set("FacilityBooking", "FB-1", "evt_123", action="Create", end_iso="2026-01-01T11:00:00")
+    store.set("FacilityBooking", "FB-1", {"calendar_event_id": "evt_123"})
 
     store.delete("FacilityBooking", "FB-1")
 
     assert store.get("FacilityBooking", "FB-1") is None
 
 
+def test_set_without_custom_time_leaves_it_unset():
+    store = EventStore(bucket_name="test-bucket", client=_FakeClient())
+
+    store.set("Program", "107638", {"online": True})
+
+    blob = store._blob("Program", "107638")
+    blob.reload()
+    assert blob.custom_time is None
+
+
 def test_set_does_not_move_custom_time_earlier():
     store = EventStore(bucket_name="test-bucket", client=_FakeClient())
-    store.set("FacilityBooking", "FB-1", "evt_123", action="Create", end_iso="2026-06-01T11:00:00")
+    store.set(
+        "FacilityBooking", "FB-1", {"calendar_event_id": "evt_123"}, custom_time="2026-06-01T11:00:00"
+    )
 
-    store.set("FacilityBooking", "FB-1", "evt_123", action="Update", end_iso="2026-01-01T09:00:00")
+    store.set(
+        "FacilityBooking", "FB-1", {"calendar_event_id": "evt_123"}, custom_time="2026-01-01T09:00:00"
+    )
 
     blob = store._blob("FacilityBooking", "FB-1")
     blob.reload()
     assert blob.custom_time == datetime.fromisoformat("2026-06-01T11:00:00")
+
+
+def test_add_list_and_remove_membership():
+    store = EventStore(bucket_name="test-bucket", client=_FakeClient())
+
+    store.add_membership("Program", "107638", "Activities", "111")
+    store.add_membership("Program", "107638", "Activities", "222")
+
+    assert sorted(store.list_members("Program", "107638", "Activities")) == ["111", "222"]
+
+    store.remove_membership("Program", "107638", "Activities", "111")
+
+    assert store.list_members("Program", "107638", "Activities") == ["222"]
+
+
+def test_list_members_with_no_children_is_empty():
+    store = EventStore(bucket_name="test-bucket", client=_FakeClient())
+
+    assert store.list_members("Program", "no-such-program", "Activities") == []
+
+
+def test_remove_membership_on_missing_marker_does_not_raise():
+    store = EventStore(bucket_name="test-bucket", client=_FakeClient())
+
+    store.remove_membership("Program", "107638", "Activities", "111")  # must not raise
