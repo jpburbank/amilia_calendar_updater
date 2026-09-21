@@ -1,0 +1,25 @@
+{
+  "textPayload": "AMILIA_RAW_PAYLOAD headers={'Host': 'us-west1-cm-calendar-506017.cloudfunctions.net', 'X-Amilia-Signature': 'pD5nKpGVqU+gq8bQNIpa9tcMVAyqoorWSx3AHVy5ZQM=', 'X-Datadog-Trace-Id': '10563418133559912252', 'X-Datadog-Parent-Id': '3122572661721961516', 'X-Datadog-Sampling-Priority': '-1', 'X-Datadog-Tags': '_dd.p.tid=6aad960f00000000', 'Traceparent': '00-6aad960f000000009298ccd338c2273c-f03321e1b1106c76-01', 'Tracestate': 'dd=s:-1;p:2b559b4aaf48942c', 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': '1102', 'X-Cloud-Trace-Context': '6aad960f000000009298ccd338c2273c/17308215046136949878;o=1', 'X-Forwarded-Proto': 'https', 'X-Forwarded-For': '64.187.182.76', 'Forwarded': 'for=\"64.187.182.76\";proto=https', 'Function-Execution-Id': 'kdvAJwnQAJ3Y'} body={\"OrganizationId\":17659,\"Context\":\"Activity\",\"Action\":\"Update\",\"Name\":\"cal-update-activity\",\"EventTime\":\"2026-09-18T15:50:39.759532-04:00\",\"Payload\":{\"Tags\":[],\"Description\":\"<p>this is a test for webhooks</p>\\n\",\"Prerequisite\":null,\"Note\":null,\"ThirdPartyUrl\":null,\"AdditionalInformation\":\"\",\"ResponsibleName\":\"\",\"Price\":0.0000,\"DropInPrice\":0.0,\"Age\":null,\"MaxAttendance\":2147483647,\"SpotsRemaining\":2147483647,\"SpotsReserved\":0,\"NumberOfOccurrences\":2,\"StartDate\":\"2026-09-25T12:46:00-04:00\",\"EndDate\":\"2026-10-27T13:29:00-04:00\",\"ScheduleSummary\":[\"Friday, September 25, 2026, 12:46 PM - 1:46 PM\",\"Every 2 weeks, Tuesdays, 12:29 PM - 1:29 PM\"],\"HasScheduleChanged\":true,\"HasSessionEnabled\":true,\"HasDropInEnabled\":false,\"AgeSummary\":\"\",\"Groups\":[],\"RegistrationPeriods\":[],\"PictureUrl\":null,\"Id\":7311901,\"Name\":\"Test Activity\",\"BillingLabel\":\"Classes and Workshops - Metal Shop - Skill classes - Test Activity\",\"ProgramId\":107638,\"ProgramName\":\"Classes and Workshops\",\"CategoryId\":5525637,\"CategoryName\":\"Metal Shop\",\"SubCategoryId\":5525638,\"SubCategoryName\":\"Skill classes\",\"Status\":\"Hidden\"}}",
+  "insertId": "6aad960f000c5a01e0b89660",
+  "resource": {
+    "type": "cloud_run_revision",
+    "labels": {
+      "revision_name": "amilia-calendar-updater-00010-rin",
+      "configuration_name": "amilia-calendar-updater",
+      "location": "us-west1",
+      "project_id": "cm-calendar-506017",
+      "service_name": "amilia-calendar-updater"
+    }
+  },
+  "timestamp": "2026-09-18T19:50:39.809473Z",
+  "severity": "INFO",
+  "labels": {
+    "goog-drz-cloudfunctions-location": "us-west1",
+    "instanceId": "00a41e8c1dace0d59fedc8e801455856e0bec16c6f7775d318cc97acab6b155b3815c8310296b2287527bc33e7668c05f30d9b1d42b9561e4bc5a8593e09c2ac3379156fbe6f37ef9914a8182e6f",
+    "goog-drz-cloudfunctions-id": "amilia-calendar-updater",
+    "goog-managed-by": "cloudfunctions",
+    "run.googleapis.com/base_image_versions": "us-docker.pkg.dev/serverless-runtimes/google-22-full/runtimes/python312:python312_20260909_3_12_14_RC00"
+  },
+  "logName": "projects/cm-calendar-506017/logs/run.googleapis.com%2Fstdout",
+  "receiveTimestamp": "2026-09-18T19:50:39.885862313Z"
+}

@@ -11,6 +11,11 @@ from googleapiclient.errors import HttpError
 os.environ.setdefault("GOOGLE_CALENDAR_ID", "test-calendar@group.calendar.google.com")
 os.environ.setdefault("GOOGLE_EVENT_STORE_BUCKET", "test-bucket")
 os.environ.setdefault("AMILIA_WEBHOOK_TOKEN", "test-token")
+os.environ.setdefault("AMILIA_API_USERNAME", "test-user")
+os.environ.setdefault("AMILIA_API_PASSWORD", "test-password")
+os.environ.setdefault("GCP_PROJECT_ID", "test-project")
+os.environ.setdefault("RECONCILE_QUEUE_ID", "test-queue")
+os.environ.setdefault("RECONCILE_WORKER_URL", "https://example.invalid/reconcile")
 
 import main  # noqa: E402  (import needs the env vars above set)
 
@@ -19,9 +24,11 @@ app = Flask(__name__)
 
 @pytest.fixture(autouse=True)
 def no_real_credentials(monkeypatch):
-    """Keep the tests off the metadata server."""
+    """Keep the tests off the metadata server and any real network calls."""
     monkeypatch.setattr(main, "_get_calendar_client", lambda: object())
     monkeypatch.setattr(main, "_get_event_store", lambda: object())
+    monkeypatch.setattr(main, "_get_amilia_client", lambda: object())
+    monkeypatch.setattr(main, "_get_task_queue", lambda: object())
 
 
 def call(method="POST", json_body=None, handler=None, monkeypatch=None, token="test-token"):
