@@ -18,7 +18,7 @@ Setup (done once per calendar, by that calendar's owner):
      "Share with specific people or groups" -> Add people -> paste that
      email -> permission "Make changes to events".
 
-  4. Verify:  GOOGLE_CALENDAR_ID=... python check_access.py
+  4. Verify:  GOOGLE_CALENDAR_ID=... PYTHONPATH=src python scripts/check_access.py
 
 Step 3 has to happen in the Calendar UI: an unshared service account has no
 standing to grant itself access, so there is no API path that bootstraps it.

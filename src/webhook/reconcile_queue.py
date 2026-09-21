@@ -16,7 +16,7 @@ Setup: the queue, its IAM enqueuer grant to this function's runtime service
 account, and the invoker grant letting Cloud Tasks call the
 reconcile-worker Cloud Function are all Terraform-managed in the sibling
 amilia_calendar_updater_gcp_resources project (tasks.tf) — run
-`terraform apply` there, and deploy reconcile_worker.py as its own Cloud
+`terraform apply` there, and deploy ../reconciler/main.py as its own Cloud
 Function, before relying on this.
 """
 
@@ -43,7 +43,7 @@ class ReconcileQueue:
         self._invoker_service_account = invoker_service_account
 
     def enqueue_reconciliation(self, activity_id) -> None:
-        """Schedules a single reconcile_worker.py invocation for this activity."""
+        """Schedules a single reconciler (src/reconciler/main.py) invocation for this activity."""
         task = {
             "http_request": {
                 "http_method": tasks_v2.HttpMethod.POST,

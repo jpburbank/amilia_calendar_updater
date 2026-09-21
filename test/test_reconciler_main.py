@@ -7,7 +7,19 @@ os.environ.setdefault("GOOGLE_EVENT_STORE_BUCKET", "test-bucket")
 
 from flask import Flask, request  # noqa: E402
 
-import reconcile_worker  # noqa: E402  (import needs the env vars above set)
+# Both src/webhook/main.py and src/reconciler/main.py are literally named
+# main.py (a Cloud Functions constraint — see either module's docstring),
+# so loading this one by explicit file path with a distinct name avoids a
+# sys.modules collision with test_webhook_main.py in the same pytest
+# session — see that file's comment for the full explanation.
+import importlib.util
+from pathlib import Path
+
+_spec = importlib.util.spec_from_file_location(
+    "reconciler_main", Path(__file__).parent.parent / "src" / "reconciler" / "main.py"
+)
+reconciler_main = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(reconciler_main)  # noqa: E402  (import needs the env vars above set)
 
 app = Flask(__name__)
 
@@ -38,10 +50,10 @@ class _FakeEventStore:
 
 
 def _call(activity_id, monkeypatch, calendar_client, event_store):
-    monkeypatch.setattr(reconcile_worker, "_get_calendar_client", lambda: calendar_client)
-    monkeypatch.setattr(reconcile_worker, "_get_event_store", lambda: event_store)
+    monkeypatch.setattr(reconciler_main, "_get_calendar_client", lambda: calendar_client)
+    monkeypatch.setattr(reconciler_main, "_get_event_store", lambda: event_store)
     with app.test_request_context(method="POST", json={"activity_id": activity_id}):
-        response, status_code = reconcile_worker.reconcile_activity(request)
+        response, status_code = reconciler_main.reconcile_activity(request)
         return status_code, response.get_json()
 
 

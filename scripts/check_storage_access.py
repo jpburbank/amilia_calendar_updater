@@ -9,7 +9,7 @@ Not imported by the function — this is a manual, run-it-yourself script.
 As the function's own identity (the check that matters):
     gcloud auth application-default login \
       --impersonate-service-account=<SA_EMAIL>
-    GOOGLE_EVENT_STORE_BUCKET=... python check_storage_access.py
+    GOOGLE_EVENT_STORE_BUCKET=... python scripts/check_storage_access.py
 
 Impersonating needs roles/iam.serviceAccountTokenCreator on that service
 account. Running it as yourself instead only tells you the bucket exists —

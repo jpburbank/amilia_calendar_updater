@@ -1,3 +1,8 @@
+# Local dev/test convenience only — the union of both deployed functions'
+# needs, so one `pip install` covers running the whole test suite. Neither
+# Cloud Function is actually deployed from this file: each has its own,
+# narrower requirements.txt (src/webhook/, src/reconciler/) that only lists
+# what it actually imports.
 functions-framework==3.*
 flask==3.*
 google-auth==2.*

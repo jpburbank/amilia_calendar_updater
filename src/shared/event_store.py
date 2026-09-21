@@ -15,7 +15,7 @@ amilia_calendar_updater_gcp_resources project (storage.tf) — run
 exposed as that project's `amilia_calendar_event_mappings_bucket` output;
 set it as GOOGLE_EVENT_STORE_BUCKET here.
 
-Verify access once the bucket exists:  GOOGLE_EVENT_STORE_BUCKET=... python check_storage_access.py
+Verify access once the bucket exists:  GOOGLE_EVENT_STORE_BUCKET=... python scripts/check_storage_access.py
 
 No Cloud Storage API to enable — it's on by default for every project.
 

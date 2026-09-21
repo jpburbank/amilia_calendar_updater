@@ -4,7 +4,7 @@ from datetime import datetime
 
 from google.api_core.exceptions import NotFound
 
-from event_store import EventStore
+from shared.event_store import EventStore
 
 
 class _FakeBlob:
