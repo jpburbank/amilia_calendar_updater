@@ -17,7 +17,22 @@ os.environ.setdefault("GCP_PROJECT_ID", "test-project")
 os.environ.setdefault("RECONCILE_QUEUE_ID", "test-queue")
 os.environ.setdefault("RECONCILE_WORKER_URL", "https://example.invalid/reconcile")
 
-import main  # noqa: E402  (import needs the env vars above set)
+# src/webhook/main.py and src/reconciler/main.py are both literally named
+# main.py (a Cloud Functions constraint — see either module's docstring),
+# so a plain `import main` would collide between the two test files in
+# this same pytest session (and silently return whichever loaded first,
+# via sys.modules). Loading by explicit file path with a distinct name
+# avoids that, while still exercising main.py's own imports exactly as
+# Cloud Functions does — via whatever's on sys.path (src, src/webhook;
+# see pyproject.toml's pythonpath).
+import importlib.util
+from pathlib import Path
+
+_spec = importlib.util.spec_from_file_location(
+    "webhook_main", Path(__file__).parent.parent / "src" / "webhook" / "main.py"
+)
+webhook_main = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(webhook_main)  # noqa: E402  (import needs the env vars above set)
 
 app = Flask(__name__)
 
@@ -25,10 +40,10 @@ app = Flask(__name__)
 @pytest.fixture(autouse=True)
 def no_real_credentials(monkeypatch):
     """Keep the tests off the metadata server and any real network calls."""
-    monkeypatch.setattr(main, "_get_calendar_client", lambda: object())
-    monkeypatch.setattr(main, "_get_event_store", lambda: object())
-    monkeypatch.setattr(main, "_get_amilia_client", lambda: object())
-    monkeypatch.setattr(main, "_get_task_queue", lambda: object())
+    monkeypatch.setattr(webhook_main, "_get_calendar_client", lambda: object())
+    monkeypatch.setattr(webhook_main, "_get_event_store", lambda: object())
+    monkeypatch.setattr(webhook_main, "_get_amilia_client", lambda: object())
+    monkeypatch.setattr(webhook_main, "_get_task_queue", lambda: object())
 
 
 def call(method="POST", json_body=None, handler=None, monkeypatch=None, token="test-token"):
@@ -40,10 +55,10 @@ def call(method="POST", json_body=None, handler=None, monkeypatch=None, token="t
     other value tests the check itself.
     """
     if handler is not None:
-        monkeypatch.setitem(main.HANDLERS, "FacilityBooking", handler)
+        monkeypatch.setitem(webhook_main.HANDLERS, "FacilityBooking", handler)
     query_string = {"token": token} if token is not None else {}
     with app.test_request_context(method=method, json=json_body, query_string=query_string):
-        response, status_code = main.amilia_webhook(request)
+        response, status_code = webhook_main.amilia_webhook(request)
         return status_code, response.get_json()
 
 
@@ -154,4 +169,4 @@ def test_malformed_payload_is_dropped_at_error_level(caplog, monkeypatch):
 
 def test_every_status_has_a_log_level():
     """Guards against a new _respond() call site with no level mapped."""
-    assert set(main._LOG_LEVELS) == {"ok", "ignored", "rejected", "skipped", "dropped"}
+    assert set(webhook_main._LOG_LEVELS) == {"ok", "ignored", "rejected", "skipped", "dropped"}

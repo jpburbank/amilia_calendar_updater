@@ -3,8 +3,15 @@ Amilia -> Google Calendar webhook receiver
 Cloud Function (2nd gen), Python runtime, HTTP trigger.
 
 Auth: a dedicated runtime service account, which the target calendar's owner
-has shared the calendar with. See calendar_client.py for the setup steps and
-check_access.py to verify them.
+has shared the calendar with. See shared/calendar_client.py for the setup
+steps and scripts/check_access.py to verify them.
+
+Layout: this directory (src/webhook/) is exactly what --source points at —
+Cloud Functions' buildpack deploy always imports a file named main.py from
+the --source directory, so this function and reconciler (src/reconciler/)
+can't share one source tree despite sharing code. shared/ here is a
+generated copy of ../shared/, not hand-maintained — run
+scripts/build.sh from the repo root before every deploy to refresh it.
 
 Deploy:
   gcloud services enable calendar-json.googleapis.com
@@ -28,23 +35,26 @@ Deploy:
 
   # Program/Activity sync needs three more things, all set up by the same
   # Terraform project — see amilia_client.py, reconcile_queue.py, and
-  # reconcile_worker.py:
+  # ../reconciler/main.py:
   #   1. A dedicated Amilia user for REST API access (occurrence data the
   #      webhooks don't carry). Terraform creates the amilia-api-username /
   #      amilia-api-password secret *containers* only — set the real values
   #      manually (see secrets.tf's comment) before deploying.
   #   2. The Cloud Tasks queue used to fan out Program visibility flips.
-  #   3. reconcile_worker.py deployed as its own Cloud Function
+  #   3. ../reconciler/main.py deployed as its own Cloud Function
   #      (amilia-activity-reconciler, --no-allow-unauthenticated — see its
   #      own module docstring for that deploy command) *before* this
   #      function's first deploy, since RECONCILE_WORKER_URL below needs
   #      its URL.
 
+  # From the repo root:
+  ./scripts/build.sh
+
   gcloud functions deploy amilia-calendar-updater \
     --gen2 \
     --runtime=python312 \
     --region=<REGION> \
-    --source=. \
+    --source=src/webhook \
     --entry-point=amilia_webhook \
     --trigger-http \
     --allow-unauthenticated \
@@ -69,10 +79,10 @@ import functions_framework
 from flask import Request, jsonify
 
 from amilia_client import AmiliaClient
-from calendar_client import CalendarClient
-from event_store import EventStore
 from handlers import handle_activity, handle_facility_booking, handle_program
 from reconcile_queue import ReconcileQueue
+from shared.calendar_client import CalendarClient
+from shared.event_store import EventStore
 
 
 class _StructuredFormatter(logging.Formatter):

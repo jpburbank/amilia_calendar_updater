@@ -9,9 +9,9 @@ absorbs the rest via **_ignored rather than declaring every parameter.
 from __future__ import annotations
 
 from amilia_client import AmiliaClient
-from calendar_client import CalendarClient
-from event_store import EventStore
 from reconcile_queue import ReconcileQueue
+from shared.calendar_client import CalendarClient
+from shared.event_store import EventStore
 
 
 # ---------------------------------------------------------------------------
@@ -229,7 +229,7 @@ def handle_activity(
             # start/end are stored (not just calendar_event_id) so a later
             # Program-triggered reconciliation can create/recreate this
             # occurrence's event without another REST call — see
-            # reconcile_worker.py.
+            # src/reconciler/main.py.
             occurrence_map[occurrence_id] = {
                 "start": occurrence["Start"],
                 "end": occurrence["End"],

@@ -1,0 +1,9 @@
+[tool.pytest.ini_options]
+# src/ for the shared.* package; src/webhook and src/reconciler so each
+# function's own sibling-file imports (e.g. `from handlers import ...` in
+# src/webhook/main.py) resolve exactly as they do when Cloud Functions
+# execs that directory's main.py directly. See test/test_webhook_main.py's
+# comment for why the two main.py files themselves are loaded by explicit
+# path rather than a plain `import main`.
+pythonpath = ["src", "src/webhook", "src/reconciler"]
+testpaths = ["test"]

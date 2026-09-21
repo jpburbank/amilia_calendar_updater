@@ -12,7 +12,7 @@ A Cloud Function deployment has the following requirements.
 3. The permissions to be able to deploy and start a Cloud Function
 
 ### Storage bucket setup
-The event-ID mapping store (see `event_store.py`) needs a bucket, an IAM binding for the
+The event-ID mapping store (see `src/shared/event_store.py`) needs a bucket, an IAM binding for the
 function's service account, and a retention lifecycle applied. This is Terraform-managed in the
 sibling `amilia_calendar_updater_gcp_resources` project (`storage.tf`) — run `terraform apply`
 there before deploying this function, or after changing the retention window
@@ -30,7 +30,7 @@ gcloud secrets versions access latest --secret=amilia-webhook-token
 ```
 
 ### Amilia REST API credentials (Program/Activity sync)
-`amilia_client.py` fetches per-occurrence schedule data (Start/End/Location) that Amilia's
+`src/webhook/amilia_client.py` fetches per-occurrence schedule data (Start/End/Location) that Amilia's
 webhooks don't carry, using a dedicated Amilia user account rather than the runtime service
 account (Amilia has no concept of a GCP identity). Terraform creates the
 `amilia-api-username` / `amilia-api-password` secret *containers* only — it cannot set real
@@ -43,8 +43,8 @@ printf '%s' '<password>' | gcloud secrets versions add amilia-api-password --dat
 
 ### Cloud Tasks queue setup (Program/Activity sync)
 A Program's `Online` flag flipping fans out to one async task per child Activity (via
-`reconcile_queue.py`/`reconcile_worker.py`) rather than looping inline in the webhook handler,
-since a Program's activity list can realistically run into the low hundreds. The queue is
+`src/webhook/reconcile_queue.py`/`src/reconciler/main.py`) rather than looping inline in the
+webhook handler, since a Program's activity list can realistically run into the low hundreds. The queue is
 Terraform-managed (`tasks.tf`) — run `terraform apply` there before deploying. Its ID is exposed
 as the `reconcile_queue_id` output for `RECONCILE_QUEUE_ID` in `env.yaml`.
 
@@ -52,12 +52,60 @@ The queue also needs permission to invoke the reconciler function below, which m
 **`amilia-activity-reconciler` must be deployed once before running `terraform apply` for the
 invoker IAM binding to succeed** (see `tasks.tf`'s comment) — deploy it, then re-apply Terraform.
 
-### CLI
-In the root of the project run the following on the command line
-.
+### Source layout
+Two separately deployed Cloud Functions, each its own self-contained directory:
+
 ```
+src/
+  shared/       calendar_client.py, event_store.py — the single source of truth for both
+  webhook/      main.py (amilia_webhook) + handlers.py, amilia_client.py, reconcile_queue.py
+  reconciler/   main.py (reconcile_activity) — the Cloud Tasks worker
+scripts/        check_access.py, check_storage_access.py, build.sh
+test/
+```
+
+Cloud Functions' buildpack deploy always imports a file named `main.py` from whatever `--source`
+points at, so the two functions can't share one source tree even though they share code —
+`src/shared/` is copied into `src/webhook/shared/` and `src/reconciler/shared/` by
+`scripts/build.sh`, which **must be run before every deploy** (those two copies are generated and
+gitignored, not hand-maintained).
+
+#### Why `scripts/build.sh` has to run before every deploy
+
+`gcloud functions deploy --source=<dir>` uploads *exactly* the contents of `<dir>` — nothing
+outside it. `src/webhook/main.py` and `src/reconciler/main.py` both do
+`from shared.calendar_client import CalendarClient`, which needs a real `shared/` subdirectory
+physically present inside their own directory at upload time. The canonical `shared/` code lives
+at `src/shared/`, a *sibling* of both — outside what either deploy uploads — so gcloud has no way
+to see it unless a copy has already been placed inside `src/webhook/` and `src/reconciler/`.
+`scripts/build.sh` is that copy step, nothing more.
+
+Skipping it fails in one of two ways:
+- **`shared/` doesn't exist yet** (fresh clone, or it was cleaned) → deploy fails at container
+  startup with `ModuleNotFoundError: No module named 'shared'` (we hit this deploying the
+  reconciler the first time).
+- **`shared/` exists but is stale** — if `src/shared/calendar_client.py` or `event_store.py`
+  changes and you deploy without re-running `build.sh`, you silently ship the *old* shared code.
+  No error, just wrong behavior.
+
+**Why not a symlink instead** (`src/webhook/shared -> ../shared`), so it's always in sync with no
+separate step? Symbolic links don't reliably survive cloud source-staging — this is a known,
+recurring problem across GCP/Firebase function deployments in general (not just this project),
+and the standard workaround people converge on is exactly this copy-at-build-time approach.
+Structurally, a symlink here would point at `../shared`, a path *outside* the uploaded directory
+— if gcloud preserves it as a symlink rather than resolving it locally, that target won't exist
+on Google's remote build environment (only `--source`'s contents get uploaded), reproducing the
+same `ModuleNotFoundError` non-deterministically. Not worth testing empirically against
+undocumented platform behavior when the copy-script approach is simple and already proven to
+work.
+
+### CLI
+From the root of the project:
+```
+./scripts/build.sh
+
 gcloud functions deploy amilia-calendar-updater --gen2 --runtime=python312 --region=us-west1 \
-    --source=. --entry-point=amilia_webhook --trigger-http --allow-unauthenticated \
+    --source=src/webhook --entry-point=amilia_webhook --trigger-http --allow-unauthenticated \
     --service-account=amilia-calendar-updater@cm-calendar-506017.iam.gserviceaccount.com \
     --env-vars-file=env.yaml \
     --set-secrets="AMILIA_WEBHOOK_TOKEN=amilia-webhook-token:latest,AMILIA_API_USERNAME=amilia-api-username:latest,AMILIA_API_PASSWORD=amilia-api-password:latest"
@@ -66,12 +114,15 @@ gcloud functions deploy amilia-calendar-updater --gen2 --runtime=python312 --reg
 The reconciliation worker is a second, separate Cloud Function — deploy it too (before the
 command above, the first time, per the ordering note above):
 ```
+./scripts/build.sh
+
 gcloud functions deploy amilia-activity-reconciler --gen2 --runtime=python312 --region=us-west1 \
-    --source=. --entry-point=reconcile_activity --trigger-http --no-allow-unauthenticated \
+    --source=src/reconciler --entry-point=reconcile_activity --trigger-http --no-allow-unauthenticated \
     --service-account=amilia-calendar-updater@cm-calendar-506017.iam.gserviceaccount.com \
     --env-vars-file=env.yaml
 ```
-It shares the same source directory and `env.yaml` (it only reads `GOOGLE_CALENDAR_ID` and
-`GOOGLE_EVENT_STORE_BUCKET` from it — the other entries are simply unused by this function).
-`--no-allow-unauthenticated` is deliberate: only Cloud Tasks, via a signed identity token, should
-ever be able to call it.
+It shares the repo's one `env.yaml` (it only reads `GOOGLE_CALENDAR_ID` and
+`GOOGLE_EVENT_STORE_BUCKET` from it — the other entries are simply unused by this function), but
+has its own, smaller `src/reconciler/requirements.txt` — it carries none of the webhook-only
+dependencies (Cloud Tasks client, `requests`). `--no-allow-unauthenticated` is deliberate: only
+Cloud Tasks, via a signed identity token, should ever be able to call it.

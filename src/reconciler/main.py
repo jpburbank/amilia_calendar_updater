@@ -14,15 +14,26 @@ one task on its own schedule instead.
 
 Does not call the Amilia REST API. Each occurrence's Start/End is already
 stored on the Activity's own document from its last Create/Update (see
-handlers.py); only whether it should currently be *on* the calendar
-changes here, never when or where it happens.
+../webhook/handlers.py); only whether it should currently be *on* the
+calendar changes here, never when or where it happens.
 
-Deploy:
+Layout: this directory (src/reconciler/) is exactly what --source points
+at, deliberately separate from src/webhook/ (Cloud Functions' buildpack
+deploy always imports a file named main.py from --source, so two
+functions can't share one source tree even though they share code) —
+this one intentionally carries none of the webhook-only dependencies
+(Cloud Tasks client, requests, handlers.py, amilia_client.py). shared/
+here is a generated copy of ../shared/, not hand-maintained — run
+scripts/build.sh from the repo root before every deploy to refresh it.
+
+Deploy (from the repo root):
+  ./scripts/build.sh
+
   gcloud functions deploy amilia-activity-reconciler \
     --gen2 \
     --runtime=python312 \
     --region=<REGION> \
-    --source=. \
+    --source=src/reconciler \
     --entry-point=reconcile_activity \
     --trigger-http \
     --no-allow-unauthenticated \
@@ -38,8 +49,8 @@ import os
 import functions_framework
 from flask import Request, jsonify
 
-from calendar_client import CalendarClient
-from event_store import EventStore
+from shared.calendar_client import CalendarClient
+from shared.event_store import EventStore
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

@@ -4,11 +4,12 @@ GOOGLE_CALENDAR_ID. Run it after sharing the calendar, before pointing
 Amilia at the deployed function.
 
 Not imported by the function — this is a manual, run-it-yourself script.
+Run from the repo root, with src/ on the path (for shared.calendar_client):
 
 As the function's own identity (the check that matters):
     gcloud auth application-default login \
       --impersonate-service-account=<SA_EMAIL>
-    GOOGLE_CALENDAR_ID=... python check_access.py
+    GOOGLE_CALENDAR_ID=... PYTHONPATH=src python scripts/check_access.py
 
 Impersonating needs roles/iam.serviceAccountTokenCreator on that service
 account. Running it as yourself instead only tells you the calendar ID is
@@ -26,7 +27,7 @@ import google.auth.transport.requests
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from calendar_client import SCOPES
+from shared.calendar_client import SCOPES
 
 PROBE_SUMMARY = "amilia-calendar-updater access check (safe to delete)"
 
