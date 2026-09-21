@@ -52,6 +52,24 @@ The queue also needs permission to invoke the reconciler function below, which m
 **`amilia-activity-reconciler` must be deployed once before running `terraform apply` for the
 invoker IAM binding to succeed** (see `tasks.tf`'s comment) — deploy it, then re-apply Terraform.
 
+### Backfill (Program/Activity sync)
+Webhooks only deliver *changes* — anything created in Amilia before the `Program`/`Activity`
+webhook subscriptions existed will never get a `Create` webhook. `scripts/backfill.py` is a
+one-time, standalone bulk loader that seeds the event store (and creates matching calendar
+events) for every Program and every Activity whose last occurrence hasn't ended more than
+`--lookback-days` (default 30) in the past — no forward bound, so anything upcoming is always
+included. Safe to re-run (won't duplicate calendar events already recorded). Deliberately doesn't
+import anything from `src/webhook/` — see its own module docstring for why. Run once, before
+relying on live Program/Activity sync, impersonating the function's own service account:
+```
+gcloud auth application-default login \
+  --impersonate-service-account=amilia-calendar-updater@cm-calendar-506017.iam.gserviceaccount.com
+
+GOOGLE_CALENDAR_ID=... GOOGLE_EVENT_STORE_BUCKET=... PYTHONPATH=src python scripts/backfill.py \
+  --org-id 17659 --amilia-username <user> --amilia-password <pass> --dry-run
+```
+Drop `--dry-run` once the preview output looks right.
+
 ### Source layout
 Two separately deployed Cloud Functions, each its own self-contained directory:
 
