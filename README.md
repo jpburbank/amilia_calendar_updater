@@ -70,6 +70,35 @@ points at, so the two functions can't share one source tree even though they sha
 `scripts/build.sh`, which **must be run before every deploy** (those two copies are generated and
 gitignored, not hand-maintained).
 
+#### Why `scripts/build.sh` has to run before every deploy
+
+`gcloud functions deploy --source=<dir>` uploads *exactly* the contents of `<dir>` — nothing
+outside it. `src/webhook/main.py` and `src/reconciler/main.py` both do
+`from shared.calendar_client import CalendarClient`, which needs a real `shared/` subdirectory
+physically present inside their own directory at upload time. The canonical `shared/` code lives
+at `src/shared/`, a *sibling* of both — outside what either deploy uploads — so gcloud has no way
+to see it unless a copy has already been placed inside `src/webhook/` and `src/reconciler/`.
+`scripts/build.sh` is that copy step, nothing more.
+
+Skipping it fails in one of two ways:
+- **`shared/` doesn't exist yet** (fresh clone, or it was cleaned) → deploy fails at container
+  startup with `ModuleNotFoundError: No module named 'shared'` (we hit this deploying the
+  reconciler the first time).
+- **`shared/` exists but is stale** — if `src/shared/calendar_client.py` or `event_store.py`
+  changes and you deploy without re-running `build.sh`, you silently ship the *old* shared code.
+  No error, just wrong behavior.
+
+**Why not a symlink instead** (`src/webhook/shared -> ../shared`), so it's always in sync with no
+separate step? Symbolic links don't reliably survive cloud source-staging — this is a known,
+recurring problem across GCP/Firebase function deployments in general (not just this project),
+and the standard workaround people converge on is exactly this copy-at-build-time approach.
+Structurally, a symlink here would point at `../shared`, a path *outside* the uploaded directory
+— if gcloud preserves it as a symlink rather than resolving it locally, that target won't exist
+on Google's remote build environment (only `--source`'s contents get uploaded), reproducing the
+same `ModuleNotFoundError` non-deterministically. Not worth testing empirically against
+undocumented platform behavior when the copy-script approach is simple and already proven to
+work.
+
 ### CLI
 From the root of the project:
 ```
