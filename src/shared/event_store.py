@@ -121,6 +121,22 @@ class EventStore:
         prefix = f"{parent_context}/{parent_id}/{child_context}/"
         return [blob.name[len(prefix) :] for blob in self._bucket.list_blobs(prefix=prefix)]
 
+    def list_all(self, context: str) -> list[str]:
+        """
+        Returns the external_ids of every document stored under this context.
+        Excludes membership markers, which live one level deeper (e.g.
+        "Program/107638/Activities/111" is a marker, not a document, and is
+        never mistaken for one here since it contains an extra "/" after the
+        prefix and has no ".json" suffix).
+        """
+        prefix = f"{context}/"
+        ids = []
+        for blob in self._bucket.list_blobs(prefix=prefix):
+            remainder = blob.name[len(prefix) :]
+            if remainder.endswith(".json") and "/" not in remainder:
+                ids.append(remainder[: -len(".json")])
+        return ids
+
     def _blob(self, context: str, external_id: str):
         return self._bucket.blob(f"{context}/{external_id}.json")
 

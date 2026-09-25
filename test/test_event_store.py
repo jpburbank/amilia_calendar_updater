@@ -130,3 +130,20 @@ def test_remove_membership_on_missing_marker_does_not_raise():
     store = EventStore(bucket_name="test-bucket", client=_FakeClient())
 
     store.remove_membership("Program", "107638", "Activities", "111")  # must not raise
+
+
+def test_list_all_returns_only_documents_not_membership_markers():
+    store = EventStore(bucket_name="test-bucket", client=_FakeClient())
+    store.set("Activity", "111", {"name": "A"})
+    store.set("Activity", "222", {"name": "B"})
+    store.set("Program", "107638", {"name": "P"})
+    store.add_membership("Program", "107638", "Activities", "111")
+
+    assert sorted(store.list_all("Activity")) == ["111", "222"]
+    assert store.list_all("Program") == ["107638"]
+
+
+def test_list_all_on_empty_context_is_empty():
+    store = EventStore(bucket_name="test-bucket", client=_FakeClient())
+
+    assert store.list_all("Activity") == []
