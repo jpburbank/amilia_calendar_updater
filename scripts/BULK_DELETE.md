@@ -14,6 +14,28 @@ different situations:
 Deliberately standalone — see the module docstring in `bulk_delete.py` for
 why it doesn't import from `src/webhook/`.
 
+## What `--context` means
+
+`--context` picks which *kind* of thing you're deleting. It's not a free-text
+value — it's always one of `Program`, `Activity`, or `FacilityBooking`, the
+same three object types Amilia sends webhooks for and this project mirrors in
+its event store (see `src/shared/event_store.py`). Every document in the
+store is filed under exactly one of these, so `--context` scopes the whole
+run to one type at a time — you can't mix, say, deleting a Program and an
+Activity in the same invocation.
+
+| `--context` | What it is in Amilia | What deleting it removes |
+|---|---|---|
+| `Program` | A container for Activities (e.g. a season of classes). Has no calendar event of its own. | Just the store record of whether it's online/offline. `--target calendar` is a no-op here. |
+| `Activity` | A specific class/offering within a Program, with one or more scheduled occurrences. | The store record (including all tracked occurrences) and every Google Calendar event created for those occurrences. |
+| `FacilityBooking` | A single booking of a space/room. | The store record and the one Google Calendar event it created. |
+
+Concretely, `--context Activity --id 7311901` means "the Activity document
+whose Amilia ID is 7311901" — nothing about Programs or FacilityBookings is
+touched, even if IDs happen to collide across contexts (which is also why the
+store namespaces documents by context in the first place — see the
+`Object naming` note in `event_store.py`).
+
 ## Running it
 
 Impersonate the function's own service account, same as `scripts/backfill.py`:
