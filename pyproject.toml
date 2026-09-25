@@ -5,5 +5,5 @@
 # execs that directory's main.py directly. See test/test_webhook_main.py's
 # comment for why the two main.py files themselves are loaded by explicit
 # path rather than a plain `import main`.
-pythonpath = ["src", "src/webhook", "src/reconciler"]
+pythonpath = ["src", "src/webhook", "src/reconciler", "scripts"]
 testpaths = ["test"]
