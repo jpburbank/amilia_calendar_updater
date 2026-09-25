@@ -70,6 +70,17 @@ GOOGLE_CALENDAR_ID=... GOOGLE_EVENT_STORE_BUCKET=... PYTHONPATH=src python scrip
 ```
 Drop `--dry-run` once the preview output looks right.
 
+### Bulk delete (testing / emergency cleanup)
+`scripts/bulk_delete.py` deletes event-store documents (and optionally the
+calendar events they reference) in bulk — by explicit ID, by parent Program,
+by age, or everything in a context. Used both for clearing out repeated test
+data and, if it's ever needed, emergency cleanup against production, so it's
+deliberately more paranoid than the backfill script: dry-run by default,
+requires `--execute` plus a `--confirm-bucket` that must exactly match the
+target bucket, refuses to run past `--limit` documents, and writes a
+timestamped audit log under `audit_logs/` (gitignored) as it goes. Full usage
+and examples: [`scripts/BULK_DELETE.md`](scripts/BULK_DELETE.md).
+
 ### Source layout
 Two separately deployed Cloud Functions, each its own self-contained directory:
 
@@ -78,7 +89,7 @@ src/
   shared/       calendar_client.py, event_store.py — the single source of truth for both
   webhook/      main.py (amilia_webhook) + handlers.py, amilia_client.py, reconcile_queue.py
   reconciler/   main.py (reconcile_activity) — the Cloud Tasks worker
-scripts/        check_access.py, check_storage_access.py, build.sh
+scripts/        check_access.py, check_storage_access.py, build.sh, backfill.py, bulk_delete.py
 test/
 ```
 

@@ -13,3 +13,6 @@ venv/
 # single source of truth, these are just deploy-time copies.
 /src/webhook/shared/
 /src/reconciler/shared/
+
+# Per-run records written by scripts/bulk_delete.py — see scripts/BULK_DELETE.md.
+/audit_logs/
