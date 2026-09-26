@@ -2,7 +2,13 @@
 
 from datetime import datetime, timedelta, timezone
 
-from backfill import backfill_activity, backfill_program, is_within_lookback, program_is_online
+from backfill import (
+    backfill_activity,
+    backfill_facility_booking,
+    backfill_program,
+    is_within_lookback,
+    program_is_online,
+)
 
 
 class _FakeCalendarClient:
@@ -179,3 +185,67 @@ def test_backfill_activity_dry_run_writes_nothing():
     assert calendar_client.calls == []
     assert event_store.get("Activity", 7311901) is None
     assert event_store.memberships == set()
+
+
+_RESERVATION = {
+    "ReservationId": "FB-16905874",
+    "Title": "Laser",
+    "Type": "FacilityBooking",
+    "Start": "2026-09-08T11:45:00-07:00",
+    "End": "2026-09-08T12:00:00-07:00",
+    "IsCancelled": False,
+    "Location": {"Id": 1923754, "Name": "Laser"},
+}
+
+
+def test_backfill_facility_booking_creates_event_when_new():
+    calendar_client = _FakeCalendarClient()
+    event_store = _FakeEventStore()
+
+    backfill_facility_booking(calendar_client, event_store, _RESERVATION, dry_run=False)
+
+    assert calendar_client.calls == [
+        {
+            "summary": "Laser booking",
+            "start_iso": "2026-09-08T11:45:00-07:00",
+            "end_iso": "2026-09-08T12:00:00-07:00",
+            "location": "Laser",
+        }
+    ]
+    doc = event_store.get("FacilityBooking", "FB-16905874")
+    assert doc["calendar_event_id"] == "evt_1"
+    assert doc["action"] == "Create"
+
+
+def test_backfill_facility_booking_skips_cancelled_reservation():
+    calendar_client = _FakeCalendarClient()
+    event_store = _FakeEventStore()
+    reservation = {**_RESERVATION, "IsCancelled": True}
+
+    backfill_facility_booking(calendar_client, event_store, reservation, dry_run=False)
+
+    assert calendar_client.calls == []
+    assert event_store.get("FacilityBooking", "FB-16905874") is None
+
+
+def test_backfill_facility_booking_is_idempotent_on_rerun():
+    calendar_client = _FakeCalendarClient()
+    event_store = _FakeEventStore(
+        documents={("FacilityBooking", "FB-16905874"): {"calendar_event_id": "evt_existing"}}
+    )
+
+    backfill_facility_booking(calendar_client, event_store, _RESERVATION, dry_run=False)
+
+    assert calendar_client.calls == []  # already tracked — not recreated
+    doc = event_store.get("FacilityBooking", "FB-16905874")
+    assert doc["calendar_event_id"] == "evt_existing"
+
+
+def test_backfill_facility_booking_dry_run_writes_nothing():
+    calendar_client = _FakeCalendarClient()
+    event_store = _FakeEventStore()
+
+    backfill_facility_booking(calendar_client, event_store, _RESERVATION, dry_run=True)
+
+    assert calendar_client.calls == []
+    assert event_store.get("FacilityBooking", "FB-16905874") is None
