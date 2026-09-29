@@ -19,6 +19,17 @@ Either activate it once per shell (`source .venv/bin/activate`, then `python` an
 correctly for the rest of that session) or invoke `.venv/bin/python` directly each time, as the
 commands below do.
 
+`.venv` should be built from Python 3.12 (see `.python-version`), matching both Cloud Functions'
+`--runtime=python312` and each other — testing locally against a different Python version than
+what's actually deployed defeats the point of running the test suite before deploying. Rebuild it
+if it's ever on the wrong version (`.venv/bin/python -V` to check):
+```
+brew install python@3.12
+rm -rf .venv
+/opt/homebrew/bin/python3.12 -m venv .venv
+.venv/bin/pip install -r requirements.txt -r requirements-dev.txt
+```
+
 ### Storage bucket setup
 The event-ID mapping store (see `src/shared/event_store.py`) needs a bucket, an IAM binding for the
 function's service account, and a retention lifecycle applied. This is Terraform-managed in the
