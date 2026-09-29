@@ -167,6 +167,27 @@ def _delete_activity_events(calendar_client: CalendarClient, activity: dict) -> 
 # parent Program's Online flag is true (Program unknown = assumed online).
 # ---------------------------------------------------------------------------
 
+def _build_activity_description(payload: dict) -> str | None:
+    """
+    Builds the calendar event description from Description/Note/Prerequisite,
+    each its own paragraph. Description has no header (Amilia already sends
+    it as its own HTML paragraph(s)); Note and Prerequisite each get an HTML
+    header matching that same style, and are omitted entirely when null or
+    empty rather than shown blank.
+    """
+    paragraphs = []
+    description = payload.get("Description")
+    if description:
+        paragraphs.append(description)
+    note = payload.get("Note")
+    if note:
+        paragraphs.append(f"<p><strong>Note</strong><br>{note}</p>")
+    prerequisite = payload.get("Prerequisite")
+    if prerequisite:
+        paragraphs.append(f"<p><strong>Prerequisite</strong><br>{prerequisite}</p>")
+    return "\n".join(paragraphs) if paragraphs else None
+
+
 def handle_activity(
     action: str,
     payload: dict,
@@ -196,6 +217,7 @@ def handle_activity(
 
         location = payload.get("LocationLabel") or None
         summary = payload.get("Name", "Activity")
+        description = _build_activity_description(payload)
 
         occurrence_map = {}
         fresh_ids = set()
@@ -213,6 +235,7 @@ def handle_activity(
                         start_iso=occurrence["Start"],
                         end_iso=occurrence["End"],
                         location=location,
+                        description=description,
                     )
                 else:
                     event = calendar_client.create_event(
@@ -220,6 +243,7 @@ def handle_activity(
                         start_iso=occurrence["Start"],
                         end_iso=occurrence["End"],
                         location=location,
+                        description=description,
                     )
                     calendar_event_id = event["id"]
             elif calendar_event_id:

@@ -6,6 +6,7 @@ from backfill import (
     backfill_activity,
     backfill_facility_booking,
     backfill_program,
+    build_activity_description,
     is_within_lookback,
     program_is_online,
 )
@@ -88,6 +89,36 @@ def test_within_lookback_keeps_activities_with_no_end_date():
     assert is_within_lookback({}, cutoff) is True
 
 
+def test_build_activity_description_all_three_fields():
+    activity = {
+        "Description": "<p>About the class.</p>",
+        "Note": "Bring your own tools.",
+        "Prerequisite": "Ages 10+",
+    }
+
+    assert build_activity_description(activity) == (
+        "<p>About the class.</p>\n"
+        "<p><strong>Note</strong><br>Bring your own tools.</p>\n"
+        "<p><strong>Prerequisite</strong><br>Ages 10+</p>"
+    )
+
+
+def test_build_activity_description_omits_null_note_and_prerequisite():
+    activity = {"Description": "<p>About the class.</p>", "Note": None, "Prerequisite": None}
+
+    assert build_activity_description(activity) == "<p>About the class.</p>"
+
+
+def test_build_activity_description_omits_empty_string_note_and_prerequisite():
+    activity = {"Description": "<p>About the class.</p>", "Note": "", "Prerequisite": ""}
+
+    assert build_activity_description(activity) == "<p>About the class.</p>"
+
+
+def test_build_activity_description_none_when_nothing_present():
+    assert build_activity_description({}) is None
+
+
 def test_backfill_program_writes_document_and_returns_online():
     event_store = _FakeEventStore()
 
@@ -121,6 +152,29 @@ def test_backfill_activity_creates_event_when_visible():
     doc = event_store.get("Activity", 7311901)
     assert doc["occurrences"]["111"]["calendar_event_id"] == "evt_1"
     assert ("Program", 107638, "Activities", 7311901) in event_store.memberships
+
+
+def test_backfill_activity_passes_description_through_to_calendar():
+    calendar_client = _FakeCalendarClient()
+    event_store = _FakeEventStore()
+    amilia = _FakeAmiliaRestClient(occurrences=_ONE_OCCURRENCE)
+    activity = {
+        "Id": 7311901,
+        "Name": "Test",
+        "ProgramId": 107638,
+        "Status": "Normal",
+        "Description": "<p>About the class.</p>",
+        "Note": "Bring your own tools.",
+        "Prerequisite": None,
+    }
+
+    backfill_activity(
+        calendar_client, event_store, amilia, 17659, activity, program_online=True, dry_run=False
+    )
+
+    assert calendar_client.calls[0]["description"] == (
+        "<p>About the class.</p>\n<p><strong>Note</strong><br>Bring your own tools.</p>"
+    )
 
 
 def test_backfill_activity_skips_calendar_when_program_offline():
