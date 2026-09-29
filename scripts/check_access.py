@@ -9,7 +9,7 @@ Run from the repo root, with src/ on the path (for shared.calendar_client):
 As the function's own identity (the check that matters):
     gcloud auth application-default login \
       --impersonate-service-account=<SA_EMAIL>
-    GOOGLE_CALENDAR_ID=... PYTHONPATH=src python scripts/check_access.py
+    GOOGLE_CALENDAR_ID=... PYTHONPATH=src .venv/bin/python scripts/check_access.py
 
 Impersonating needs roles/iam.serviceAccountTokenCreator on that service
 account. Running it as yourself instead only tells you the calendar ID is

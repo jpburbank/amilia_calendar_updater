@@ -35,7 +35,7 @@ path production does — see scripts/check_access.py for why):
       --impersonate-service-account=<SA_EMAIL>
 
     GOOGLE_CALENDAR_ID=... GOOGLE_EVENT_STORE_BUCKET=... \
-      PYTHONPATH=src python scripts/backfill.py \
+      PYTHONPATH=src .venv/bin/python scripts/backfill.py \
       --org-id 17659 --amilia-username <user> --amilia-password <pass>
 
 Add --dry-run first to preview what would happen without writing anything.
