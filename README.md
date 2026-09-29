@@ -52,15 +52,24 @@ The queue also needs permission to invoke the reconciler function below, which m
 **`amilia-activity-reconciler` must be deployed once before running `terraform apply` for the
 invoker IAM binding to succeed** (see `tasks.tf`'s comment) — deploy it, then re-apply Terraform.
 
-### Backfill (Program/Activity sync)
-Webhooks only deliver *changes* — anything created in Amilia before the `Program`/`Activity`
-webhook subscriptions existed will never get a `Create` webhook. `scripts/backfill.py` is a
-one-time, standalone bulk loader that seeds the event store (and creates matching calendar
-events) for every Program and every Activity whose last occurrence hasn't ended more than
-`--lookback-days` (default 30) in the past — no forward bound, so anything upcoming is always
-included. Safe to re-run (won't duplicate calendar events already recorded). Deliberately doesn't
-import anything from `src/webhook/` — see its own module docstring for why. Run once, before
-relying on live Program/Activity sync, impersonating the function's own service account:
+### Backfill (Program/Activity/FacilityBooking sync)
+Webhooks only deliver *changes* — anything created in Amilia before the corresponding webhook
+subscription existed will never get a `Create` webhook. `scripts/backfill.py` is a one-time,
+standalone bulk loader that seeds the event store (and creates matching calendar events) for:
+- every Program,
+- every Activity whose last occurrence hasn't ended more than `--lookback-days` (default 30) in
+  the past — no forward bound, so anything upcoming is always included, and
+- every FacilityBooking (Amilia's `/reservations` endpoint — covers AdminBooking, Activity,
+  FacilityBooking, and PrivateLesson reservation types alike, matching what the live webhook
+  already treats as one `FacilityBooking` context) with a start between `--lookback-days` in the
+  past and `--reservation-lookahead-days` (default 730, ~2 years) in the future. Unlike Activities,
+  this endpoint requires an explicit forward bound server-side, so there's no true "unbounded"
+  option here — `--reservation-lookahead-days` is a practical stand-in. Cancelled reservations are
+  skipped.
+
+Safe to re-run (won't duplicate calendar events already recorded). Deliberately doesn't import
+anything from `src/webhook/` — see its own module docstring for why. Run once, before relying on
+live sync, impersonating the function's own service account:
 ```
 gcloud auth application-default login \
   --impersonate-service-account=amilia-calendar-updater@cm-calendar-506017.iam.gserviceaccount.com

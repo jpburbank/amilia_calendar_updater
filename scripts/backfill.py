@@ -1,11 +1,23 @@
 """
 One-time bulk loader: seeds the event store (and creates matching calendar
-events) for Programs and Activities that already existed in Amilia before
-this integration's webhook subscriptions did. Webhooks only deliver
-changes going forward — without this, anything created before those
-subscriptions existed would only be discovered by the fail-open "Program
-unknown -> assumed visible" path (for Programs), or never discovered at
-all (for Activities, which have no equivalent fallback).
+events) for Programs, Activities, and FacilityBookings that already existed
+in Amilia before this integration's webhook subscriptions did. Webhooks
+only deliver changes going forward — without this, anything created before
+those subscriptions existed would only be discovered by the fail-open
+"Program unknown -> assumed visible" path (for Programs), or never
+discovered at all (for Activities and FacilityBookings, which have no
+equivalent fallback).
+
+FacilityBooking here means everything the live webhook receives under that
+same Context: Amilia's /reservations endpoint returns four Types
+(AdminBooking, Activity, FacilityBooking, PrivateLesson, with ReservationId
+prefixes AB-/AC-/FB-/PL- respectively) and this script treats all four
+uniformly, exactly like handle_facility_booking already does — none of
+this touches the separate Program/Activity backfill above. Note that a
+reservations Type of "Activity" is a booked *session* (someone reserved a
+slot), a different concept from this script's own Activity backfill, which
+seeds the Activity's own definition and occurrence schedule via
+get_program_activities()/get_activity_occurrences().
 
 Deliberately standalone: does not import anything from src/webhook/ (that
 package is specifically the Cloud Function's own code, including a Cloud
@@ -36,6 +48,16 @@ EndDate is not more than --lookback-days in the past (default 30) — no
 upper/forward bound, so anything upcoming is always included regardless of
 how far out it starts. An Activity that ended further back than that is
 treated as no longer relevant and skipped.
+
+Every FacilityBooking (of any Type) whose Start falls between --lookback-days
+in the past and --reservation-lookahead-days in the future (default 730,
+i.e. ~2 years). Unlike Activities, Amilia's /reservations endpoint requires
+an explicit date range server-side — it silently returns only *today's*
+reservations if none is given — so there's no way to ask for a truly
+unbounded forward window the way get_programs()/get_program_activities()
+allow; --reservation-lookahead-days is a practical stand-in. A cancelled
+reservation (IsCancelled) is skipped outright: there's no value in creating
+a calendar event for a slot nobody will use.
 """
 
 from __future__ import annotations
@@ -92,11 +114,24 @@ class _AmiliaRestClient:
             f"{API_BASE_URL}/org/{org_id}/activities/{activity_id}/occurrences"
         )
 
-    def _get_all_pages(self, url: str) -> list[dict]:
+    def get_reservations(self, org_id, from_date: str, to_date: str) -> list[dict]:
+        """
+        Every reservation (AdminBooking/Activity/FacilityBooking/PrivateLesson
+        — see the module docstring) with a Start between from_date and
+        to_date (plain "YYYY-MM-DD" strings). Both bounds are required:
+        omitting them doesn't mean "unbounded," it silently scopes to today.
+        """
+        return self._get_all_pages(
+            f"{API_BASE_URL}/org/{org_id}/reservations",
+            extra_params={"from": from_date, "to": to_date},
+        )
+
+    def _get_all_pages(self, url: str, extra_params: dict | None = None) -> list[dict]:
         items = []
         page = 1
         while True:
-            data = self._get(url, params={"page": page, "perPage": 2000}).json()
+            params = {"page": page, "perPage": 2000, **(extra_params or {})}
+            data = self._get(url, params=params).json()
             items.extend(data["Items"])
             if len(items) >= data["Paging"]["TotalCount"]:
                 return items
@@ -234,6 +269,39 @@ def backfill_activity(
     )
 
 
+def backfill_facility_booking(
+    calendar_client: CalendarClient, event_store: EventStore, reservation: dict, *, dry_run: bool
+) -> None:
+    reservation_id = reservation["ReservationId"]
+
+    if reservation.get("IsCancelled"):
+        print(f"  FacilityBooking {reservation_id} {reservation.get('Title')!r}: cancelled, skipped")
+        return
+
+    if event_store.get("FacilityBooking", reservation_id) is not None:
+        print(f"  FacilityBooking {reservation_id} {reservation.get('Title')!r}: already tracked, skipped")
+        return
+
+    title = reservation.get("Title", "Facility Booking")
+    print(f"  FacilityBooking {reservation_id} {title!r}: creating")
+
+    if dry_run:
+        return
+
+    event = calendar_client.create_event(
+        summary=f"{title} booking",
+        start_iso=reservation["Start"],
+        end_iso=reservation["End"],
+        location=(reservation.get("Location") or {}).get("Name"),
+    )
+    event_store.set(
+        "FacilityBooking",
+        reservation_id,
+        {"calendar_event_id": event["id"], "action": "Create"},
+        custom_time=reservation["End"],
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--org-id", required=True, help="Amilia OrganizationId")
@@ -243,7 +311,15 @@ def main() -> int:
         "--lookback-days",
         type=int,
         default=30,
-        help="Skip activities whose last occurrence ended more than this many days ago.",
+        help="Skip activities whose last occurrence ended more than this many days ago. Also used "
+        "as the start of the FacilityBooking date range.",
+    )
+    parser.add_argument(
+        "--reservation-lookahead-days",
+        type=int,
+        default=730,
+        help="End of the FacilityBooking date range — how far into the future to fetch reservations "
+        "(the /reservations endpoint requires an explicit bound; there's no true 'unbounded').",
     )
     parser.add_argument(
         "--dry-run",
@@ -310,9 +386,30 @@ def main() -> int:
         f"{skipped_activities} skipped (ended more than {args.lookback_days} days ago), "
         f"{len(failed)} failed."
     )
+
+    from_date = cutoff.strftime("%Y-%m-%d")
+    to_date = (datetime.now(timezone.utc) + timedelta(days=args.reservation_lookahead_days)).strftime(
+        "%Y-%m-%d"
+    )
+    print(f"\nFetching reservations ({from_date} to {to_date})...")
+    reservations = amilia.get_reservations(args.org_id, from_date, to_date)
+    print(f"Found {len(reservations)} reservation(s)")
+
+    reservation_failed = []
+    for reservation in reservations:
+        try:
+            backfill_facility_booking(calendar_client, event_store, reservation, dry_run=args.dry_run)
+        except Exception as exc:
+            reservation_failed.append((reservation["ReservationId"], str(exc)))
+            print(f"  FAILED reservation {reservation['ReservationId']}: {exc}", file=sys.stderr)
+        time.sleep(REQUEST_PACING_SECONDS)
+
+    print(f"\nDone. {len(reservations)} reservation(s) processed, {len(reservation_failed)} failed.")
+
+    failed.extend(reservation_failed)
     if failed:
-        for activity_id, error in failed:
-            print(f"  {activity_id}: {error}")
+        for external_id, error in failed:
+            print(f"  {external_id}: {error}")
         return 1
     return 0
 
