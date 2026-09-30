@@ -30,6 +30,7 @@ def handle_facility_booking(
             start_iso=payload["Start"],
             end_iso=payload["End"],
             location=(payload.get("Location") or {}).get("Name"),
+            extended_properties={"amilia_type": "FacilityBooking", "amilia_type_id": str(reservation_id)},
         )
         event_store.set(
             "FacilityBooking",
@@ -50,6 +51,7 @@ def handle_facility_booking(
             start_iso=payload["Start"],
             end_iso=payload["End"],
             location=(payload.get("Location") or {}).get("Name"),
+            extended_properties={"amilia_type": "FacilityBooking", "amilia_type_id": str(reservation_id)},
         )
         event_store.set(
             "FacilityBooking",
@@ -218,6 +220,7 @@ def handle_activity(
         location = payload.get("LocationLabel") or None
         summary = payload.get("Name", "Activity")
         description = _build_activity_description(payload)
+        extended_properties = {"amilia_type": "Activity", "amilia_type_id": str(activity_id)}
 
         occurrence_map = {}
         fresh_ids = set()
@@ -236,6 +239,7 @@ def handle_activity(
                         end_iso=occurrence["End"],
                         location=location,
                         description=description,
+                        extended_properties=extended_properties,
                     )
                 else:
                     event = calendar_client.create_event(
@@ -244,6 +248,7 @@ def handle_activity(
                         end_iso=occurrence["End"],
                         location=location,
                         description=description,
+                        extended_properties=extended_properties,
                     )
                     calendar_event_id = event["id"]
             elif calendar_event_id:

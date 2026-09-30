@@ -93,6 +93,14 @@ empty. Same logic in both the live webhook (`handle_activity`) and the backfill 
 its own copy (`_build_activity_description` / `build_activity_description`) per the
 no-cross-import rule above.
 
+Every Activity and FacilityBooking calendar event also carries two
+`extendedProperties.private` fields — `amilia_type` (`"Activity"` or `"FacilityBooking"`) and
+`amilia_type_id` (the Activity's own `Id`, or the FacilityBooking's `ReservationId`) — so the event
+itself identifies what it is in Amilia without needing the event store. These aren't shown
+anywhere in the Calendar UI, and "private" only means they don't propagate to other attendees'
+copies of the event — any caller with ordinary read access to the event via the API can still read
+them, there's no per-app access restriction.
+
 Safe to re-run (won't duplicate calendar events already recorded). Deliberately doesn't import
 anything from `src/webhook/` — see its own module docstring for why. Run once, before relying on
 live sync, impersonating the function's own service account:

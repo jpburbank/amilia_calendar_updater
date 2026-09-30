@@ -58,8 +58,17 @@ class CalendarClient:
         end_iso: str,
         location: Optional[str] = None,
         description: Optional[str] = None,
+        extended_properties: Optional[dict] = None,
     ) -> dict:
-        """Creates an event and returns the created event resource (contains 'id')."""
+        """
+        Creates an event and returns the created event resource (contains
+        'id'). `extended_properties` (a flat string->string dict) is stored
+        as the event's extendedProperties.private — visible via the API to
+        any caller with read access to the event, not restricted to this
+        app; "private" here only means it doesn't propagate to other
+        attendees' copies of the event, and it's never shown in the
+        Calendar UI either way.
+        """
         body = {
             "summary": summary,
             "start": {"dateTime": start_iso},
@@ -69,11 +78,17 @@ class CalendarClient:
             body["location"] = location
         if description:
             body["description"] = description
+        if extended_properties:
+            body["extendedProperties"] = {"private": extended_properties}
 
         return self._service.events().insert(calendarId=self.calendar_id, body=body).execute()
 
     def update_event(self, event_id: str, **fields) -> dict:
-        """Patches an existing event. fields may include summary/start/end/location/description."""
+        """
+        Patches an existing event. fields may include
+        summary/start_iso/end_iso/location/description/extended_properties
+        (see create_event for what extended_properties means).
+        """
         body = {}
         if "summary" in fields:
             body["summary"] = fields["summary"]
@@ -85,6 +100,8 @@ class CalendarClient:
             body["location"] = fields["location"]
         if "description" in fields:
             body["description"] = fields["description"]
+        if "extended_properties" in fields:
+            body["extendedProperties"] = {"private": fields["extended_properties"]}
 
         return self._service.events().patch(
             calendarId=self.calendar_id, eventId=event_id, body=body

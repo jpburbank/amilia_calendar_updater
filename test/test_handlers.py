@@ -110,6 +110,42 @@ def test_facility_booking_create_appends_booking_to_default_title():
     assert calendar_client.calls[0]["summary"] == "Facility Booking booking"
 
 
+def test_facility_booking_create_sets_amilia_type_extended_properties():
+    calendar_client = _FakeCalendarClient()
+
+    handle_facility_booking(
+        action="Create",
+        payload=_booking_payload(),
+        calendar_client=calendar_client,
+        event_store=_FakeEventStore(),
+    )
+
+    assert calendar_client.calls[0]["extended_properties"] == {
+        "amilia_type": "FacilityBooking",
+        "amilia_type_id": "FB-1",
+    }
+
+
+def test_facility_booking_update_sets_amilia_type_extended_properties():
+    calendar_client = _FakeCalendarClient()
+    event_store = _FakeEventStore(
+        documents={("FacilityBooking", "FB-1"): {"calendar_event_id": "evt_123"}}
+    )
+
+    handle_facility_booking(
+        action="Update",
+        payload=_booking_payload(),
+        calendar_client=calendar_client,
+        event_store=event_store,
+    )
+
+    _, fields = calendar_client.update_calls[0]
+    assert fields["extended_properties"] == {
+        "amilia_type": "FacilityBooking",
+        "amilia_type_id": "FB-1",
+    }
+
+
 def test_facility_booking_create_stores_mapping():
     event_store = _FakeEventStore()
 
@@ -399,6 +435,49 @@ def test_activity_create_hidden_status_is_not_visible_even_if_program_online():
 
     assert result["visible"] is False
     assert calendar_client.calls == []
+
+
+def test_activity_create_sets_amilia_type_extended_properties():
+    calendar_client = _FakeCalendarClient()
+    event_store = _FakeEventStore()
+
+    handle_activity(
+        action="Create",
+        payload=_activity_payload(),
+        calendar_client=calendar_client,
+        event_store=event_store,
+        org_id=17659,
+        amilia_client=_FakeAmiliaClient(occurrences=_ONE_OCCURRENCE),
+    )
+
+    assert calendar_client.calls[0]["extended_properties"] == {
+        "amilia_type": "Activity",
+        "amilia_type_id": "7311901",
+    }
+
+
+def test_activity_update_sets_amilia_type_extended_properties():
+    event_store = _FakeEventStore(
+        documents={
+            ("Activity", 7311901): {
+                "program_id": 107638,
+                "occurrences": {"141658523": {"start": "s", "end": "e", "calendar_event_id": "evt_old"}},
+            }
+        }
+    )
+    calendar_client = _FakeCalendarClient()
+
+    handle_activity(
+        action="Update",
+        payload=_activity_payload(),
+        calendar_client=calendar_client,
+        event_store=event_store,
+        org_id=17659,
+        amilia_client=_FakeAmiliaClient(occurrences=_ONE_OCCURRENCE),
+    )
+
+    _, fields = calendar_client.update_calls[0]
+    assert fields["extended_properties"] == {"amilia_type": "Activity", "amilia_type_id": "7311901"}
 
 
 def test_activity_create_passes_description_to_calendar():

@@ -242,6 +242,7 @@ def backfill_activity(
     location = activity.get("LocationLabel") or None
     summary = activity.get("Name", "Activity")
     description = build_activity_description(activity)
+    extended_properties = {"amilia_type": "Activity", "amilia_type_id": str(activity_id)}
 
     occurrence_map = {}
     created = 0
@@ -258,6 +259,7 @@ def backfill_activity(
                     end_iso=occurrence["End"],
                     location=location,
                     description=description,
+                    extended_properties=extended_properties,
                 )
                 calendar_event_id = event["id"]
             created += 1
@@ -324,6 +326,7 @@ def backfill_facility_booking(
         start_iso=reservation["Start"],
         end_iso=reservation["End"],
         location=(reservation.get("Location") or {}).get("Name"),
+        extended_properties={"amilia_type": "FacilityBooking", "amilia_type_id": str(reservation_id)},
     )
     event_store.set(
         "FacilityBooking",
