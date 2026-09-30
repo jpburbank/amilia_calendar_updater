@@ -182,6 +182,22 @@ def test_backfill_activity_creates_event_when_visible():
     assert ("Program", 107638, "Activities", 7311901) in event_store.memberships
 
 
+def test_backfill_activity_sets_amilia_type_extended_properties():
+    calendar_client = _FakeCalendarClient()
+    event_store = _FakeEventStore()
+    amilia = _FakeAmiliaRestClient(occurrences=_ONE_OCCURRENCE)
+    activity = {"Id": 7311901, "Name": "Test", "ProgramId": 107638, "Status": "Normal"}
+
+    backfill_activity(
+        calendar_client, event_store, amilia, 17659, activity, program_online=True, dry_run=False
+    )
+
+    assert calendar_client.calls[0]["extended_properties"] == {
+        "amilia_type": "Activity",
+        "amilia_type_id": "7311901",
+    }
+
+
 def test_backfill_activity_passes_description_through_to_calendar():
     calendar_client = _FakeCalendarClient()
     event_store = _FakeEventStore()
@@ -292,6 +308,7 @@ def test_backfill_facility_booking_creates_event_when_new():
             "start_iso": "2026-09-08T11:45:00-07:00",
             "end_iso": "2026-09-08T12:00:00-07:00",
             "location": "Laser",
+            "extended_properties": {"amilia_type": "FacilityBooking", "amilia_type_id": "FB-16905874"},
         }
     ]
     doc = event_store.get("FacilityBooking", "FB-16905874")
