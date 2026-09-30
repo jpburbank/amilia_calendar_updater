@@ -97,17 +97,23 @@ class _AmiliaRestClient:
     with src/webhook/amilia_client.py, per this script's module docstring.
     """
 
-    def __init__(self, username: str, password: str):
+    def __init__(self, username: str, password: str, session=None):
         self._username = username
         self._password = password
-        self._session = requests.Session()
+        self._session = session or requests.Session()
         self._token: str | None = None
 
     def get_programs(self, org_id) -> list[dict]:
         return self._get_all_pages(f"{API_BASE_URL}/org/{org_id}/programs")
 
     def get_program_activities(self, org_id, program_id) -> list[dict]:
-        return self._get_all_pages(f"{API_BASE_URL}/org/{org_id}/programs/{program_id}/activities")
+        # This endpoint's perPage max is 1000, not 2000 like the others —
+        # confirmed by a 400 ("must be a whole number between 5 and 1000")
+        # when the shared default was used here.
+        return self._get_all_pages(
+            f"{API_BASE_URL}/org/{org_id}/programs/{program_id}/activities",
+            extra_params={"perPage": 1000},
+        )
 
     def get_activity_occurrences(self, org_id, activity_id) -> list[dict]:
         return self._get_all_pages(

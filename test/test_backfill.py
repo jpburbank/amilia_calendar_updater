@@ -3,6 +3,8 @@
 from datetime import datetime, timedelta, timezone
 
 from backfill import (
+    AUTHENTICATE_URL,
+    _AmiliaRestClient,
     backfill_activity,
     backfill_facility_booking,
     backfill_program,
@@ -47,6 +49,32 @@ class _FakeAmiliaRestClient:
 
     def get_activity_occurrences(self, org_id, activity_id):
         return self.occurrences
+
+
+class _FakeAmiliaResponse:
+    def __init__(self, status_code=200, json_data=None):
+        self.status_code = status_code
+        self._json_data = json_data if json_data is not None else {}
+
+    def json(self):
+        return self._json_data
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+
+class _FakeAmiliaSession:
+    """Every URL returns one empty, fully-paged response; records what params were sent."""
+
+    def __init__(self):
+        self.calls = []
+
+    def get(self, url, headers=None, auth=None, params=None):
+        self.calls.append({"url": url, "params": params})
+        if url == AUTHENTICATE_URL:
+            return _FakeAmiliaResponse(200, {"Token": "tok"})
+        return _FakeAmiliaResponse(200, {"Items": [], "Paging": {"TotalCount": 0, "Next": ""}})
 
 
 _ONE_OCCURRENCE = [
@@ -303,3 +331,44 @@ def test_backfill_facility_booking_dry_run_writes_nothing():
 
     assert calendar_client.calls == []
     assert event_store.get("FacilityBooking", "FB-16905874") is None
+
+
+def test_get_programs_requests_the_default_page_size():
+    client = _AmiliaRestClient("u", "p", session=_FakeAmiliaSession())
+
+    client.get_programs(17659)
+
+    call = next(c for c in client._session.calls if c["url"].endswith("/org/17659/programs"))
+    assert call["params"]["perPage"] == 2000
+
+
+def test_get_program_activities_requests_the_reduced_page_size():
+    """Regression test: this endpoint's real max is 1000, not 2000 like the
+    others — a perPage=2000 request 400s against the live API ("must be a
+    whole number between 5 and 1000")."""
+    client = _AmiliaRestClient("u", "p", session=_FakeAmiliaSession())
+
+    client.get_program_activities(17659, 107638)
+
+    call = next(c for c in client._session.calls if "activities" in c["url"])
+    assert call["params"]["perPage"] == 1000
+
+
+def test_get_activity_occurrences_requests_the_default_page_size():
+    client = _AmiliaRestClient("u", "p", session=_FakeAmiliaSession())
+
+    client.get_activity_occurrences(17659, 7311901)
+
+    call = next(c for c in client._session.calls if "occurrences" in c["url"])
+    assert call["params"]["perPage"] == 2000
+
+
+def test_get_reservations_requests_the_default_page_size_and_date_range():
+    client = _AmiliaRestClient("u", "p", session=_FakeAmiliaSession())
+
+    client.get_reservations(17659, "2026-01-01", "2026-12-31")
+
+    call = next(c for c in client._session.calls if "reservations" in c["url"])
+    assert call["params"]["perPage"] == 2000
+    assert call["params"]["from"] == "2026-01-01"
+    assert call["params"]["to"] == "2026-12-31"
