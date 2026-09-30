@@ -45,7 +45,7 @@ gcloud auth application-default login \
   --impersonate-service-account=amilia-calendar-updater@cm-calendar-506017.iam.gserviceaccount.com
 
 GOOGLE_CALENDAR_ID=... GOOGLE_EVENT_STORE_BUCKET=... \
-  PYTHONPATH=src python scripts/bulk_delete.py \
+  PYTHONPATH=src .venv/bin/python scripts/bulk_delete.py \
   --context Activity --program-id 107638
 ```
 

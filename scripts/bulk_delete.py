@@ -37,7 +37,7 @@ as backfill.py:
       --impersonate-service-account=<SA_EMAIL>
 
     GOOGLE_CALENDAR_ID=... GOOGLE_EVENT_STORE_BUCKET=... \
-      PYTHONPATH=src python scripts/bulk_delete.py \
+      PYTHONPATH=src .venv/bin/python scripts/bulk_delete.py \
       --context Activity --program-id 107638
 
 See scripts/BULK_DELETE.md for full usage and examples.

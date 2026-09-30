@@ -11,6 +11,25 @@ A Cloud Function deployment has the following requirements.
 2. A logged in account to the GCP project that the Function is being deployed to
 3. The permissions to be able to deploy and start a Cloud Function
 
+### Running scripts locally
+Every script under `scripts/` (and the test suite) depends on packages installed in this repo's
+own `.venv`, not whatever `python`/`python3` resolves to system-wide — invoking a script with a
+bare `python` reliably fails with `ModuleNotFoundError: No module named 'google'` (or similar).
+Either activate it once per shell (`source .venv/bin/activate`, then `python` and `pytest` resolve
+correctly for the rest of that session) or invoke `.venv/bin/python` directly each time, as the
+commands below do.
+
+`.venv` should be built from Python 3.12 (see `.python-version`), matching both Cloud Functions'
+`--runtime=python312` and each other — testing locally against a different Python version than
+what's actually deployed defeats the point of running the test suite before deploying. Rebuild it
+if it's ever on the wrong version (`.venv/bin/python -V` to check):
+```
+brew install python@3.12
+rm -rf .venv
+/opt/homebrew/bin/python3.12 -m venv .venv
+.venv/bin/pip install -r requirements.txt -r requirements-dev.txt
+```
+
 ### Storage bucket setup
 The event-ID mapping store (see `src/shared/event_store.py`) needs a bucket, an IAM binding for the
 function's service account, and a retention lifecycle applied. This is Terraform-managed in the
@@ -74,7 +93,7 @@ live sync, impersonating the function's own service account:
 gcloud auth application-default login \
   --impersonate-service-account=amilia-calendar-updater@cm-calendar-506017.iam.gserviceaccount.com
 
-GOOGLE_CALENDAR_ID=... GOOGLE_EVENT_STORE_BUCKET=... PYTHONPATH=src python scripts/backfill.py \
+GOOGLE_CALENDAR_ID=... GOOGLE_EVENT_STORE_BUCKET=... PYTHONPATH=src .venv/bin/python scripts/backfill.py \
   --org-id 17659 --amilia-username <user> --amilia-password <pass> --dry-run
 ```
 Drop `--dry-run` once the preview output looks right.
