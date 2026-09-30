@@ -86,6 +86,13 @@ standalone bulk loader that seeds the event store (and creates matching calendar
   option here — `--reservation-lookahead-days` is a practical stand-in. Cancelled reservations are
   skipped.
 
+Every Activity calendar event's description is built from Amilia's `Description`/`Note`/
+`Prerequisite` fields, each its own paragraph — `Description` has no header (Amilia already sends
+it as HTML), `Note` and `Prerequisite` each get one, and either is omitted entirely when null or
+empty. Same logic in both the live webhook (`handle_activity`) and the backfill script, each with
+its own copy (`_build_activity_description` / `build_activity_description`) per the
+no-cross-import rule above.
+
 Safe to re-run (won't duplicate calendar events already recorded). Deliberately doesn't import
 anything from `src/webhook/` — see its own module docstring for why. Run once, before relying on
 live sync, impersonating the function's own service account:

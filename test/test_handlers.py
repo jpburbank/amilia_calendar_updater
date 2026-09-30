@@ -401,6 +401,49 @@ def test_activity_create_hidden_status_is_not_visible_even_if_program_online():
     assert calendar_client.calls == []
 
 
+def test_activity_create_passes_description_to_calendar():
+    calendar_client = _FakeCalendarClient()
+    event_store = _FakeEventStore()
+
+    handle_activity(
+        action="Create",
+        payload=_activity_payload(
+            Description="<p>About the class.</p>", Note="Bring your own tools.", Prerequisite=None
+        ),
+        calendar_client=calendar_client,
+        event_store=event_store,
+        org_id=17659,
+        amilia_client=_FakeAmiliaClient(occurrences=_ONE_OCCURRENCE),
+    )
+
+    assert calendar_client.calls[0]["description"] == (
+        "<p>About the class.</p>\n<p><strong>Note</strong><br>Bring your own tools.</p>"
+    )
+
+
+def test_activity_update_passes_description_to_calendar():
+    event_store = _FakeEventStore(
+        documents={
+            ("Activity", 7311901): {
+                "program_id": 107638,
+                "occurrences": {"141658523": {"start": "s", "end": "e", "calendar_event_id": "evt_old"}},
+            }
+        }
+    )
+    calendar_client = _FakeCalendarClient()
+
+    handle_activity(
+        action="Update",
+        payload=_activity_payload(Description="<p>Updated info.</p>"),
+        calendar_client=calendar_client,
+        event_store=event_store,
+        org_id=17659,
+        amilia_client=_FakeAmiliaClient(occurrences=_ONE_OCCURRENCE),
+    )
+
+    assert calendar_client.update_calls[0][1]["description"] == "<p>Updated info.</p>"
+
+
 def test_activity_update_creates_new_occurrence_and_removes_dropped_one():
     event_store = _FakeEventStore(
         documents={

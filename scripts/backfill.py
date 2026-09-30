@@ -192,6 +192,29 @@ def backfill_program(event_store: EventStore, program: dict, *, dry_run: bool) -
     return online
 
 
+def build_activity_description(activity: dict) -> str | None:
+    """
+    Builds the calendar event description from Description/Note/Prerequisite,
+    each its own paragraph. Description has no header (Amilia already sends
+    it as its own HTML paragraph(s)); Note and Prerequisite each get an HTML
+    header matching that same style, and are omitted entirely when null or
+    empty rather than shown blank. Same fields, same names, on both the REST
+    activity dict here and the webhook payload in handle_activity — kept as
+    a separate copy per this script's module docstring, not shared.
+    """
+    paragraphs = []
+    description = activity.get("Description")
+    if description:
+        paragraphs.append(description)
+    note = activity.get("Note")
+    if note:
+        paragraphs.append(f"<p><strong>Note</strong><br>{note}</p>")
+    prerequisite = activity.get("Prerequisite")
+    if prerequisite:
+        paragraphs.append(f"<p><strong>Prerequisite</strong><br>{prerequisite}</p>")
+    return "\n".join(paragraphs) if paragraphs else None
+
+
 def backfill_activity(
     calendar_client: CalendarClient,
     event_store: EventStore,
@@ -212,6 +235,7 @@ def backfill_activity(
     occurrences = amilia.get_activity_occurrences(org_id, activity_id)
     location = activity.get("LocationLabel") or None
     summary = activity.get("Name", "Activity")
+    description = build_activity_description(activity)
 
     occurrence_map = {}
     created = 0
@@ -227,6 +251,7 @@ def backfill_activity(
                     start_iso=occurrence["Start"],
                     end_iso=occurrence["End"],
                     location=location,
+                    description=description,
                 )
                 calendar_event_id = event["id"]
             created += 1
