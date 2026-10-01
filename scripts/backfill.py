@@ -9,15 +9,18 @@ discovered at all (for Activities and FacilityBookings, which have no
 equivalent fallback).
 
 FacilityBooking here means everything the live webhook receives under that
-same Context: Amilia's /reservations endpoint returns four Types
-(AdminBooking, Activity, FacilityBooking, PrivateLesson, with ReservationId
-prefixes AB-/AC-/FB-/PL- respectively) and this script treats all four
-uniformly, exactly like handle_facility_booking already does — none of
-this touches the separate Program/Activity backfill above. Note that a
+same Context, with one deliberate exception. Amilia's /reservations
+endpoint returns four Types (AdminBooking, Activity, FacilityBooking,
+PrivateLesson, with ReservationId prefixes AB-/AC-/FB-/PL- respectively); a
 reservations Type of "Activity" is a booked *session* (someone reserved a
-slot), a different concept from this script's own Activity backfill, which
-seeds the Activity's own definition and occurrence schedule via
-get_program_activities()/get_activity_occurrences().
+slot), a different concept from this script's own Activity backfill above,
+which seeds the Activity's own definition and occurrence schedule via
+get_program_activities()/get_activity_occurrences() — but the *session*
+itself is still something this script would otherwise also create a
+calendar event for, duplicating the one the Activity backfill already
+created for that same occurrence. So Type == "Activity" reservations are
+skipped here (see backfill_facility_booking); AdminBooking, FacilityBooking,
+and PrivateLesson are imported as before.
 
 Deliberately standalone: does not import anything from src/webhook/ (that
 package is specifically the Cloud Function's own code, including a Cloud
@@ -49,15 +52,20 @@ upper/forward bound, so anything upcoming is always included regardless of
 how far out it starts. An Activity that ended further back than that is
 treated as no longer relevant and skipped.
 
-Every FacilityBooking (of any Type) whose Start falls between --lookback-days
-in the past and --reservation-lookahead-days in the future (default 730,
-i.e. ~2 years). Unlike Activities, Amilia's /reservations endpoint requires
-an explicit date range server-side — it silently returns only *today's*
-reservations if none is given — so there's no way to ask for a truly
-unbounded forward window the way get_programs()/get_program_activities()
-allow; --reservation-lookahead-days is a practical stand-in. A cancelled
-reservation (IsCancelled) is skipped outright: there's no value in creating
-a calendar event for a slot nobody will use.
+Every FacilityBooking whose Start falls between --lookback-days in the past
+and --reservation-lookahead-days in the future (default 730, i.e. ~2 years).
+Unlike Activities, Amilia's /reservations endpoint requires an explicit date
+range server-side — it silently returns only *today's* reservations if none
+is given — so there's no way to ask for a truly unbounded forward window the
+way get_programs()/get_program_activities() allow; --reservation-lookahead-days
+is a practical stand-in. A cancelled reservation (IsCancelled) is skipped
+outright: there's no value in creating a calendar event for a slot nobody
+will use. A reservation whose Type is "Activity" is also skipped — it's a
+booked session of an Activity, not a standalone facility use, and already
+fully covered by the Activity backfill above; importing it here too would
+create a second, duplicate calendar event for the same real-world session
+(confirmed in production: every Activity occurrence was getting both its
+own event and a second "<name> booking" event from this path).
 """
 
 from __future__ import annotations
@@ -306,6 +314,15 @@ def backfill_facility_booking(
     calendar_client: CalendarClient, event_store: EventStore, reservation: dict, *, dry_run: bool
 ) -> None:
     reservation_id = reservation["ReservationId"]
+
+    if reservation.get("Type") == "Activity":
+        # A booked session of an Activity, not a standalone facility use —
+        # already fully covered by backfill_activity() via the Program ->
+        # Activities -> Occurrences path. Importing it here too would
+        # create a second, untracked-by-Program-visibility calendar event
+        # for the same real-world session.
+        print(f"  FacilityBooking {reservation_id} {reservation.get('Title')!r}: Type=Activity, skipped")
+        return
 
     if reservation.get("IsCancelled"):
         print(f"  FacilityBooking {reservation_id} {reservation.get('Title')!r}: cancelled, skipped")
