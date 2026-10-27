@@ -1,5 +1,7 @@
 """Tests for per-context webhook handlers."""
 
+import pytest
+
 from handlers import handle_activity, handle_facility_booking, handle_program
 
 
@@ -110,6 +112,21 @@ def test_facility_booking_create_appends_booking_to_default_title():
     assert calendar_client.calls[0]["summary"] == "Facility Booking booking"
 
 
+@pytest.mark.parametrize("title", [None, ""])
+def test_facility_booking_create_uses_default_title_when_title_is_blank(title):
+    """Amilia sends Title as null/empty, not missing, on untitled admin bookings."""
+    calendar_client = _FakeCalendarClient()
+
+    handle_facility_booking(
+        action="Create",
+        payload=_booking_payload(Title=title),
+        calendar_client=calendar_client,
+        event_store=_FakeEventStore(),
+    )
+
+    assert calendar_client.calls[0]["summary"] == "Facility Booking booking"
+
+
 def test_facility_booking_create_sets_amilia_type_extended_properties():
     calendar_client = _FakeCalendarClient()
 
@@ -179,9 +196,60 @@ def test_facility_booking_update_uses_stored_mapping():
         "calendar_event_id": "evt_123",
         "updated": True,
     }
-    event_id, fields = calendar_client.update_calls[0]
+    event_id, _ = calendar_client.update_calls[0]
     assert event_id == "evt_123"
-    assert fields["summary"] == "Laser"
+
+
+def test_facility_booking_update_appends_booking_to_title():
+    calendar_client = _FakeCalendarClient()
+    event_store = _FakeEventStore(
+        documents={("FacilityBooking", "FB-1"): {"calendar_event_id": "evt_123"}}
+    )
+
+    handle_facility_booking(
+        action="Update",
+        payload=_booking_payload(Title="Laser"),
+        calendar_client=calendar_client,
+        event_store=event_store,
+    )
+
+    _, fields = calendar_client.update_calls[0]
+    assert fields["summary"] == "Laser booking"
+
+
+def test_facility_booking_update_appends_booking_to_default_title():
+    calendar_client = _FakeCalendarClient()
+    event_store = _FakeEventStore(
+        documents={("FacilityBooking", "FB-1"): {"calendar_event_id": "evt_123"}}
+    )
+
+    handle_facility_booking(
+        action="Update",
+        payload=_booking_payload(),
+        calendar_client=calendar_client,
+        event_store=event_store,
+    )
+
+    _, fields = calendar_client.update_calls[0]
+    assert fields["summary"] == "Facility Booking booking"
+
+
+@pytest.mark.parametrize("title", [None, ""])
+def test_facility_booking_update_uses_default_title_when_title_is_blank(title):
+    calendar_client = _FakeCalendarClient()
+    event_store = _FakeEventStore(
+        documents={("FacilityBooking", "FB-1"): {"calendar_event_id": "evt_123"}}
+    )
+
+    handle_facility_booking(
+        action="Update",
+        payload=_booking_payload(Title=title),
+        calendar_client=calendar_client,
+        event_store=event_store,
+    )
+
+    _, fields = calendar_client.update_calls[0]
+    assert fields["summary"] == "Facility Booking booking"
 
 
 def test_facility_booking_update_with_no_mapping_skips():

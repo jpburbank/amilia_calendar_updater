@@ -332,7 +332,7 @@ def backfill_facility_booking(
         print(f"  FacilityBooking {reservation_id} {reservation.get('Title')!r}: already tracked, skipped")
         return
 
-    title = reservation.get("Title", "Facility Booking")
+    title = reservation.get("Title") or "Facility Booking"
     print(f"  FacilityBooking {reservation_id} {title!r}: creating")
 
     if dry_run:

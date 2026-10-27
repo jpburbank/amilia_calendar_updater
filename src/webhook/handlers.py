@@ -24,7 +24,7 @@ def handle_facility_booking(
     reservation_id = payload.get("ReservationId")
 
     if action == "Create":
-        title = payload.get("Title", "Facility Booking")
+        title = payload.get("Title") or "Facility Booking"
         event = calendar_client.create_event(
             summary=f"{title} booking",
             start_iso=payload["Start"],
@@ -45,9 +45,10 @@ def handle_facility_booking(
         if existing is None:
             return {"reservation_id": reservation_id, "skipped": "no stored event mapping"}
         event_id = existing["calendar_event_id"]
+        title = payload.get("Title") or "Facility Booking"
         calendar_client.update_event(
             event_id,
-            summary=payload.get("Title", "Facility Booking"),
+            summary=f"{title} booking",
             start_iso=payload["Start"],
             end_iso=payload["End"],
             location=(payload.get("Location") or {}).get("Name"),
