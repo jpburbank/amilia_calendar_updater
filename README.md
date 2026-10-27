@@ -78,13 +78,16 @@ standalone bulk loader that seeds the event store (and creates matching calendar
 - every Program,
 - every Activity whose last occurrence hasn't ended more than `--lookback-days` (default 30) in
   the past — no forward bound, so anything upcoming is always included, and
-- every FacilityBooking (Amilia's `/reservations` endpoint — covers AdminBooking, Activity,
-  FacilityBooking, and PrivateLesson reservation types alike, matching what the live webhook
-  already treats as one `FacilityBooking` context) with a start between `--lookback-days` in the
-  past and `--reservation-lookahead-days` (default 730, ~2 years) in the future. Unlike Activities,
-  this endpoint requires an explicit forward bound server-side, so there's no true "unbounded"
-  option here — `--reservation-lookahead-days` is a practical stand-in. Cancelled reservations are
-  skipped.
+- every FacilityBooking (Amilia's `/reservations` endpoint — covers AdminBooking, FacilityBooking,
+  and PrivateLesson reservation types, matching what the live webhook already treats as one
+  `FacilityBooking` context) with a start between `--lookback-days` in the past and
+  `--reservation-lookahead-days` (default 730, ~2 years) in the future. Unlike Activities, this
+  endpoint requires an explicit forward bound server-side, so there's no true "unbounded" option
+  here — `--reservation-lookahead-days` is a practical stand-in. Cancelled reservations are
+  skipped, and so is a reservation `Type` of `Activity` — that's a booked *session* of an Activity,
+  not a standalone facility use, already fully covered by the Activity backfill above; importing
+  it here too would duplicate that occurrence's calendar event (confirmed in production before
+  this exclusion: 251 of 457 FacilityBooking documents had an `AC-` prefix, every one a duplicate).
 
 Every Activity calendar event's description is built from Amilia's `Description`/`Note`/
 `Prerequisite` fields, each its own paragraph — `Description` has no header (Amilia already sends

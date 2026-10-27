@@ -327,6 +327,22 @@ def test_backfill_facility_booking_skips_cancelled_reservation():
     assert event_store.get("FacilityBooking", "FB-16905874") is None
 
 
+def test_backfill_facility_booking_skips_type_activity_reservation():
+    """Regression test: Type=="Activity" reservations are booked sessions of
+    an Activity, already covered by backfill_activity() — importing them
+    here too duplicated every Activity occurrence's calendar event in
+    production (confirmed: 251 of 457 FacilityBooking docs had an AC-
+    prefix, each a duplicate)."""
+    calendar_client = _FakeCalendarClient()
+    event_store = _FakeEventStore()
+    reservation = {**_RESERVATION, "ReservationId": "AC-138583648", "Type": "Activity"}
+
+    backfill_facility_booking(calendar_client, event_store, reservation, dry_run=False)
+
+    assert calendar_client.calls == []
+    assert event_store.get("FacilityBooking", "AC-138583648") is None
+
+
 def test_backfill_facility_booking_is_idempotent_on_rerun():
     calendar_client = _FakeCalendarClient()
     event_store = _FakeEventStore(
