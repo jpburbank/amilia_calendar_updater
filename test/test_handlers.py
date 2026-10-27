@@ -179,9 +179,42 @@ def test_facility_booking_update_uses_stored_mapping():
         "calendar_event_id": "evt_123",
         "updated": True,
     }
-    event_id, fields = calendar_client.update_calls[0]
+    event_id, _ = calendar_client.update_calls[0]
     assert event_id == "evt_123"
-    assert fields["summary"] == "Laser"
+
+
+def test_facility_booking_update_appends_booking_to_title():
+    calendar_client = _FakeCalendarClient()
+    event_store = _FakeEventStore(
+        documents={("FacilityBooking", "FB-1"): {"calendar_event_id": "evt_123"}}
+    )
+
+    handle_facility_booking(
+        action="Update",
+        payload=_booking_payload(Title="Laser"),
+        calendar_client=calendar_client,
+        event_store=event_store,
+    )
+
+    _, fields = calendar_client.update_calls[0]
+    assert fields["summary"] == "Laser booking"
+
+
+def test_facility_booking_update_appends_booking_to_default_title():
+    calendar_client = _FakeCalendarClient()
+    event_store = _FakeEventStore(
+        documents={("FacilityBooking", "FB-1"): {"calendar_event_id": "evt_123"}}
+    )
+
+    handle_facility_booking(
+        action="Update",
+        payload=_booking_payload(),
+        calendar_client=calendar_client,
+        event_store=event_store,
+    )
+
+    _, fields = calendar_client.update_calls[0]
+    assert fields["summary"] == "Facility Booking booking"
 
 
 def test_facility_booking_update_with_no_mapping_skips():
