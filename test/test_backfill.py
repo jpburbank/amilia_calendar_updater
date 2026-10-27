@@ -2,6 +2,8 @@
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from backfill import (
     AUTHENTICATE_URL,
     _AmiliaRestClient,
@@ -314,6 +316,17 @@ def test_backfill_facility_booking_creates_event_when_new():
     doc = event_store.get("FacilityBooking", "FB-16905874")
     assert doc["calendar_event_id"] == "evt_1"
     assert doc["action"] == "Create"
+
+
+@pytest.mark.parametrize("title", [None, ""])
+def test_backfill_facility_booking_uses_default_title_when_title_is_blank(title):
+    """Amilia sends Title as null/empty, not missing, on untitled admin bookings."""
+    calendar_client = _FakeCalendarClient()
+    reservation = {**_RESERVATION, "Title": title}
+
+    backfill_facility_booking(calendar_client, _FakeEventStore(), reservation, dry_run=False)
+
+    assert calendar_client.calls[0]["summary"] == "Facility Booking booking"
 
 
 def test_backfill_facility_booking_skips_cancelled_reservation():
