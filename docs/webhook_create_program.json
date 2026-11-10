@@ -1,0 +1,25 @@
+{
+    "textPayload": "AMILIA_RAW_PAYLOAD headers={'Host': 'us-west1-cm-calendar-506017.cloudfunctions.net', 'X-Amilia-Signature': 'd402iYUXZE3FY+tpdnqT5/76jUODQ11gWo2dqVu2VIo=', 'X-Datadog-Trace-Id': '9234233949205889183', 'X-Datadog-Parent-Id': '16003607338996039270', 'X-Datadog-Sampling-Priority': '-1', 'X-Datadog-Tags': '_dd.p.tid=6aad834000000000', 'Traceparent': '00-6aad834000000000802696da0b45009f-9866127caecd69a5-01', 'Tracestate': 'dd=s:-1;p:de183c1585b17e66', 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': '363', 'X-Cloud-Trace-Context': '6aad834000000000802696da0b45009f/10981485068107475365;o=1', 'X-Forwarded-Proto': 'https', 'X-Forwarded-For': '64.187.182.76', 'Forwarded': 'for=\"64.187.182.76\";proto=https', 'Function-Execution-Id': 'o88FozzUML70'} body={\"OrganizationId\":17659,\"Context\":\"Program\",\"Action\":\"Create\",\"Name\":\"cal-create-program\",\"EventTime\":\"2026-09-18T14:30:24.6556211-04:00\",\"Payload\":{\"Id\":139039,\"Name\":\"Test Program\",\"Url\":\"https://app.amilia.com/store/en/create-makerspace/shop/programs/139039\",\"Online\":false,\"StartDate\":\"2026-09-17T07:00:00-07:00\",\"ExpirationDate\":\"2026-09-21T07:00:00-07:00\"}}",
+    "insertId": "6aad83420005a9b898480fc3",
+    "resource": {
+        "type": "cloud_run_revision",
+        "labels": {
+            "service_name": "amilia-calendar-updater",
+            "project_id": "cm-calendar-506017",
+            "revision_name": "amilia-calendar-updater-00010-rin",
+            "configuration_name": "amilia-calendar-updater",
+            "location": "us-west1"
+        }
+    },
+    "timestamp": "2026-09-18T18:30:26.371128Z",
+    "severity": "INFO",
+    "labels": {
+        "instanceId": "00a41e8c1de9be0965849540f2411b22d1317e72e401dec22f2317db4d4e09a7121ddd0fab416103d407210590891deadd818addd7f6bb05930ad46e4a60e489e0d6b6bbc384526ea0b26139e88c",
+        "goog-drz-cloudfunctions-location": "us-west1",
+        "goog-drz-cloudfunctions-id": "amilia-calendar-updater",
+        "goog-managed-by": "cloudfunctions",
+        "run.googleapis.com/base_image_versions": "us-docker.pkg.dev/serverless-runtimes/google-22-full/runtimes/python312:python312_20260909_3_12_14_RC00"
+    },
+    "logName": "projects/cm-calendar-506017/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-09-18T18:30:26.710095146Z"
+}
