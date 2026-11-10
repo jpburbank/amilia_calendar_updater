@@ -3,6 +3,24 @@
 Open security issues (identified but not yet fixed) are tracked in
 [`docs/security-notes.md`](docs/security-notes.md).
 
+## What gets synced
+
+Amilia **Programs**, **Activities**, and each Activity's **occurrences** (one calendar event per
+session) are synced to Google Calendar.
+
+**FacilityBookings are not synced by default.** They were part of the original requirements, but
+as of 2026-11 the calendar no longer needs them. The code is kept and tested, not deleted, behind
+a feature flag:
+
+| Env var (`env.yaml`) | Default | Effect |
+|---|---|---|
+| `FACILITY_BOOKING_SYNC_ENABLED` | `"false"` | `"true"` routes FacilityBooking webhooks to `handle_facility_booking` and makes `scripts/backfill.py` import reservations. Off: FacilityBooking webhooks are logged and answered `status=ignored` (HTTP 200), and the backfill skips `/reservations` entirely. Any value other than `true`/`false` makes the function fail at startup. |
+
+Turning it on or off takes effect on the next deploy. Turning it off leaves existing
+FacilityBooking calendar events and event-store documents in place: they are no longer updated
+or deleted, so clear them manually if they shouldn't stay. The flag lives in
+`src/shared/feature_flags.py`.
+
 ## Deployment
 
 If changes have been made or for some other reason the Cloud Function needs to be redeployed, and have passed tests, do the following.
@@ -105,9 +123,11 @@ standalone bulk loader that seeds the event store (and creates matching calendar
 - every Program,
 - every Activity whose last occurrence hasn't ended more than `--lookback-days` (default 30) in
   the past — no forward bound, so anything upcoming is always included, and
-- every FacilityBooking (Amilia's `/reservations` endpoint — covers AdminBooking, FacilityBooking,
-  and PrivateLesson reservation types, matching what the live webhook already treats as one
-  `FacilityBooking` context) with a start between `--lookback-days` in the past and
+- every FacilityBooking, **only when `FACILITY_BOOKING_SYNC_ENABLED` is `"true"`** (see
+  [What gets synced](#what-gets-synced); otherwise this phase is skipped). These come from
+  Amilia's `/reservations` endpoint, which covers the AdminBooking, FacilityBooking, and
+  PrivateLesson reservation types, matching what the live webhook treats as one
+  `FacilityBooking` context. Only reservations with a start between `--lookback-days` in the past and
   `--reservation-lookahead-days` (default 730, ~2 years) in the future. Unlike Activities, this
   endpoint requires an explicit forward bound server-side, so there's no true "unbounded" option
   here — `--reservation-lookahead-days` is a practical stand-in. Cancelled reservations are

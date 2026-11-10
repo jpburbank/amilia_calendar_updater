@@ -52,6 +52,9 @@ Deploy:
   # switching dev/prod calendars is a new secret version plus a redeploy.
   # See README.md "Target calendar".
 
+  # FacilityBooking sync is off unless env.yaml sets
+  # FACILITY_BOOKING_SYNC_ENABLED: "true" — see shared/feature_flags.py.
+
   # From the repo root:
   ./scripts/build.sh
 
