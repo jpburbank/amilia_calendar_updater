@@ -51,6 +51,16 @@ rm -rf .venv
 .venv/bin/pip install -r requirements.txt -r requirements-dev.txt
 ```
 
+### Linting and formatting
+[Ruff](https://docs.astral.sh/ruff/) is both the formatter and the linter, configured in
+`pyproject.toml` (100-column lines; generated `shared/` copies excluded). It's installed from
+`requirements-dev.txt`. Run both before every commit, along with the tests:
+```
+.venv/bin/ruff format .
+.venv/bin/ruff check .        # add --fix to apply the safe autofixes
+.venv/bin/python -m pytest -q
+```
+
 ### Storage bucket setup
 The event-ID mapping store (see `src/shared/event_store.py`) needs a bucket, an IAM binding for the
 function's service account, and a retention lifecycle applied. This is Terraform-managed in the
