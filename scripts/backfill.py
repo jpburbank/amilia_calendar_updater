@@ -22,11 +22,17 @@ created for that same occurrence. So Type == "Activity" reservations are
 skipped here (see backfill_facility_booking); AdminBooking, FacilityBooking,
 and PrivateLesson are imported as before.
 
+The whole FacilityBooking phase only runs when FACILITY_BOOKING_SYNC_ENABLED
+is "true" (read from the environment, same as the live webhook; off by
+default, see src/shared/feature_flags.py). With it off, the script still
+backfills Programs and Activities and skips the /reservations fetch
+entirely.
+
 Deliberately standalone: does not import anything from src/webhook/ (that
 package is specifically the Cloud Function's own code, including a Cloud
 Tasks dependency this script has no use for) — it makes its own Amilia
 REST calls and writes calendar/store state directly, reusing only
-src/shared/ (calendar_client.py, event_store.py), which is designed to be
+src/shared/ (calendar_client.py, event_store.py, feature_flags.py), which is designed to be
 shared by exactly this kind of caller. The Amilia REST-calling logic below
 duplicates part of src/webhook/amilia_client.py rather than importing it,
 by design.
@@ -83,6 +89,7 @@ import requests
 
 from shared.calendar_client import CalendarClient
 from shared.event_store import EventStore
+from shared.feature_flags import facility_booking_sync_enabled
 
 AUTHENTICATE_URL = "https://www.amilia.com/api/V3/authenticate"
 API_BASE_URL = "https://app.amilia.com/api/v3/en"
@@ -354,6 +361,44 @@ def backfill_facility_booking(
     )
 
 
+def backfill_facility_bookings(
+    calendar_client: CalendarClient,
+    event_store: EventStore,
+    amilia: _AmiliaRestClient,
+    org_id,
+    from_date: str,
+    to_date: str,
+    *,
+    enabled: bool,
+    dry_run: bool,
+) -> list[tuple[str, str]]:
+    """
+    Backfills every reservation in [from_date, to_date], returning
+    (ReservationId, error) for each one that failed. Does nothing, not even
+    the /reservations fetch, unless FACILITY_BOOKING_SYNC_ENABLED is on
+    (`enabled`), mirroring the live webhook ignoring FacilityBooking then.
+    """
+    if not enabled:
+        print("\nSkipping reservations: FACILITY_BOOKING_SYNC_ENABLED is off.")
+        return []
+
+    print(f"\nFetching reservations ({from_date} to {to_date})...")
+    reservations = amilia.get_reservations(org_id, from_date, to_date)
+    print(f"Found {len(reservations)} reservation(s)")
+
+    failed = []
+    for reservation in reservations:
+        try:
+            backfill_facility_booking(calendar_client, event_store, reservation, dry_run=dry_run)
+        except Exception as exc:
+            failed.append((reservation["ReservationId"], str(exc)))
+            print(f"  FAILED reservation {reservation['ReservationId']}: {exc}", file=sys.stderr)
+        time.sleep(REQUEST_PACING_SECONDS)
+
+    print(f"\nDone. {len(reservations)} reservation(s) processed, {len(failed)} failed.")
+    return failed
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--org-id", required=True, help="Amilia OrganizationId")
@@ -443,22 +488,18 @@ def main() -> int:
     to_date = (datetime.now(timezone.utc) + timedelta(days=args.reservation_lookahead_days)).strftime(
         "%Y-%m-%d"
     )
-    print(f"\nFetching reservations ({from_date} to {to_date})...")
-    reservations = amilia.get_reservations(args.org_id, from_date, to_date)
-    print(f"Found {len(reservations)} reservation(s)")
-
-    reservation_failed = []
-    for reservation in reservations:
-        try:
-            backfill_facility_booking(calendar_client, event_store, reservation, dry_run=args.dry_run)
-        except Exception as exc:
-            reservation_failed.append((reservation["ReservationId"], str(exc)))
-            print(f"  FAILED reservation {reservation['ReservationId']}: {exc}", file=sys.stderr)
-        time.sleep(REQUEST_PACING_SECONDS)
-
-    print(f"\nDone. {len(reservations)} reservation(s) processed, {len(reservation_failed)} failed.")
-
-    failed.extend(reservation_failed)
+    failed.extend(
+        backfill_facility_bookings(
+            calendar_client,
+            event_store,
+            amilia,
+            args.org_id,
+            from_date,
+            to_date,
+            enabled=facility_booking_sync_enabled(),
+            dry_run=args.dry_run,
+        )
+    )
     if failed:
         for external_id, error in failed:
             print(f"  {external_id}: {error}")

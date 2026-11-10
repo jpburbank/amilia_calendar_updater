@@ -9,6 +9,7 @@ from backfill import (
     _AmiliaRestClient,
     backfill_activity,
     backfill_facility_booking,
+    backfill_facility_bookings,
     backfill_program,
     build_activity_description,
     is_within_lookback,
@@ -418,3 +419,36 @@ def test_get_reservations_requests_the_default_page_size_and_date_range():
     assert call["params"]["perPage"] == 2000
     assert call["params"]["from"] == "2026-01-01"
     assert call["params"]["to"] == "2026-12-31"
+
+
+class _FakeReservationsClient:
+    def __init__(self, reservations):
+        self.reservations = reservations
+        self.calls = []
+
+    def get_reservations(self, org_id, from_date, to_date):
+        self.calls.append((org_id, from_date, to_date))
+        return self.reservations
+
+
+def test_backfill_facility_bookings_does_nothing_when_disabled():
+    amilia = _FakeReservationsClient([dict(_RESERVATION)])
+    calendar = _FakeCalendarClient()
+    failed = backfill_facility_bookings(
+        calendar, _FakeEventStore(), amilia, 17659, "2026-01-01", "2026-12-31", enabled=False, dry_run=False
+    )
+    assert failed == []
+    assert amilia.calls == []
+    assert calendar.calls == []
+
+
+def test_backfill_facility_bookings_imports_reservations_when_enabled(monkeypatch):
+    monkeypatch.setattr("backfill.REQUEST_PACING_SECONDS", 0)
+    amilia = _FakeReservationsClient([dict(_RESERVATION)])
+    calendar = _FakeCalendarClient()
+    failed = backfill_facility_bookings(
+        calendar, _FakeEventStore(), amilia, 17659, "2026-01-01", "2026-12-31", enabled=True, dry_run=False
+    )
+    assert failed == []
+    assert amilia.calls == [(17659, "2026-01-01", "2026-12-31")]
+    assert len(calendar.calls) == 1
