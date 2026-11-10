@@ -204,6 +204,7 @@ class EventStore:
   ```python
   _event_store: EventStore | None = None
 
+
   def _get_event_store() -> EventStore:
       global _event_store
       if _event_store is None:
@@ -212,7 +213,12 @@ class EventStore:
   ```
 - Update the single handler call site:
   ```python
-  result = handler(action=action, payload=payload, calendar_client=_get_calendar_client(), event_store=_get_event_store())
+  result = handler(
+      action=action,
+      payload=payload,
+      calendar_client=_get_calendar_client(),
+      event_store=_get_event_store(),
+  )
   ```
 
 ### 4. `requirements.txt`

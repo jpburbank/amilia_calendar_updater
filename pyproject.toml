@@ -7,3 +7,19 @@
 # path rather than a plain `import main`.
 pythonpath = ["src", "src/webhook", "src/reconciler", "scripts"]
 testpaths = ["test"]
+
+[tool.ruff]
+# Matches the existing code, which mostly wraps at ~100 columns.
+line-length = 100
+target-version = "py312"
+# Generated copies of src/shared/ made by scripts/build.sh.
+extend-exclude = ["src/webhook/shared", "src/reconciler/shared"]
+
+[tool.ruff.lint]
+# pycodestyle errors/warnings, pyflakes, import sorting, bugbear, pyupgrade.
+select = ["E", "W", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.isort]
+# First-party modules the functions import as top-level names (see
+# pythonpath above), so isort groups them with the project's own code.
+known-first-party = ["shared", "handlers", "amilia_client", "reconcile_queue", "backfill", "bulk_delete"]

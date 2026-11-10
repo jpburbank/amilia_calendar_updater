@@ -47,6 +47,14 @@ Deploy:
   #      function's first deploy, since RECONCILE_WORKER_URL below needs
   #      its URL.
 
+  # The target calendar ID is the google-calendar-id secret (also from the
+  # Terraform project; the value is set by hand), not an env.yaml entry, so
+  # switching dev/prod calendars is a new secret version plus a redeploy.
+  # See README.md "Target calendar".
+
+  # FacilityBooking sync is off unless env.yaml sets
+  # FACILITY_BOOKING_SYNC_ENABLED: "true" — see shared/feature_flags.py.
+
   # From the repo root:
   ./scripts/build.sh
 
@@ -60,7 +68,7 @@ Deploy:
     --allow-unauthenticated \
     --service-account=amilia-calendar-updater@<PROJECT_ID>.iam.gserviceaccount.com \
     --env-vars-file=env.yaml \
-    --set-secrets="AMILIA_WEBHOOK_TOKEN=amilia-webhook-token:latest,AMILIA_API_USERNAME=amilia-api-username:latest,AMILIA_API_PASSWORD=amilia-api-password:latest"
+    --set-secrets="GOOGLE_CALENDAR_ID=google-calendar-id:latest,AMILIA_WEBHOOK_TOKEN=amilia-webhook-token:latest,AMILIA_API_USERNAME=amilia-api-username:latest,AMILIA_API_PASSWORD=amilia-api-password:latest"
 
 Amilia webhook contract (see /apidocs/ApiDocs/v1webhooks.html):
   POST body: { "OrganizationId", "Context", "Action", "Name", "EventTime", "Payload": {...} }
@@ -83,6 +91,7 @@ from handlers import handle_activity, handle_facility_booking, handle_program
 from reconcile_queue import ReconcileQueue
 from shared.calendar_client import CalendarClient
 from shared.event_store import EventStore
+from shared.feature_flags import facility_booking_sync_enabled
 
 
 class _StructuredFormatter(logging.Formatter):
@@ -127,16 +136,26 @@ RECONCILE_WORKER_URL = os.environ["RECONCILE_WORKER_URL"]
 _REGION = "us-west1"
 _SERVICE_ACCOUNT_EMAIL = f"amilia-calendar-updater@{GCP_PROJECT_ID}.iam.gserviceaccount.com"
 
-# Route by (Context) -> handler function. Each handler is called with the
-# same full set of keyword arguments (action, payload, calendar_client,
-# event_store, org_id, amilia_client, task_queue) and absorbs whichever it
-# doesn't need via **_ignored. Contexts not listed here (e.g. Registration,
-# ignored for now) fall through to the "ignored" 200 response below.
-HANDLERS = {
-    "FacilityBooking": handle_facility_booking,
-    "Program": handle_program,
-    "Activity": handle_activity,
-}
+
+def _build_handlers(facility_booking_enabled: bool) -> dict:
+    """
+    Route by (Context) -> handler function. Each handler is called with the
+    same full set of keyword arguments (action, payload, calendar_client,
+    event_store, org_id, amilia_client, task_queue) and absorbs whichever it
+    doesn't need via **_ignored. Contexts not listed here (e.g. Registration,
+    or FacilityBooking while FACILITY_BOOKING_SYNC_ENABLED is off — see
+    shared/feature_flags.py) fall through to the "ignored" 200 response below.
+    """
+    handlers = {
+        "Program": handle_program,
+        "Activity": handle_activity,
+    }
+    if facility_booking_enabled:
+        handlers["FacilityBooking"] = handle_facility_booking
+    return handlers
+
+
+HANDLERS = _build_handlers(facility_booking_sync_enabled())
 
 # Every response carries one of these statuses, and each is logged at a level
 # reflecting what it cost:

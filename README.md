@@ -1,5 +1,26 @@
 # Amilia Calendar Updater
 
+Open security issues (identified but not yet fixed) are tracked in
+[`docs/security-notes.md`](docs/security-notes.md).
+
+## What gets synced
+
+Amilia **Programs**, **Activities**, and each Activity's **occurrences** (one calendar event per
+session) are synced to Google Calendar.
+
+**FacilityBookings are not synced by default.** They were part of the original requirements, but
+as of 2026-11 the calendar no longer needs them. The code is kept and tested, not deleted, behind
+a feature flag:
+
+| Env var (`env.yaml`) | Default | Effect |
+|---|---|---|
+| `FACILITY_BOOKING_SYNC_ENABLED` | `"false"` | `"true"` routes FacilityBooking webhooks to `handle_facility_booking` and makes `scripts/backfill.py` import reservations. Off: FacilityBooking webhooks are logged and answered `status=ignored` (HTTP 200), and the backfill skips `/reservations` entirely. Any value other than `true`/`false` makes the function fail at startup. |
+
+Turning it on or off takes effect on the next deploy. Turning it off leaves existing
+FacilityBooking calendar events and event-store documents in place: they are no longer updated
+or deleted, so clear them manually if they shouldn't stay. The flag lives in
+`src/shared/feature_flags.py`.
+
 ## Deployment
 
 If changes have been made or for some other reason the Cloud Function needs to be redeployed, and have passed tests, do the following.
@@ -30,6 +51,16 @@ rm -rf .venv
 .venv/bin/pip install -r requirements.txt -r requirements-dev.txt
 ```
 
+### Linting and formatting
+[Ruff](https://docs.astral.sh/ruff/) is both the formatter and the linter, configured in
+`pyproject.toml` (100-column lines; generated `shared/` copies excluded). It's installed from
+`requirements-dev.txt`. Run both before every commit, along with the tests:
+```
+.venv/bin/ruff format .
+.venv/bin/ruff check .        # add --fix to apply the safe autofixes
+.venv/bin/python -m pytest -q
+```
+
 ### Storage bucket setup
 The event-ID mapping store (see `src/shared/event_store.py`) needs a bucket, an IAM binding for the
 function's service account, and a retention lifecycle applied. This is Terraform-managed in the
@@ -47,6 +78,30 @@ appended as a query param, e.g. `?token=<value>`, fetched with:
 ```
 gcloud secrets versions access latest --secret=amilia-webhook-token
 ```
+
+### Target calendar (switching between dev and prod)
+The calendar both functions write to is the `google-calendar-id` secret, not an `env.yaml`
+entry, so switching calendars (the current one is dev-only; production will use a different one)
+needs no code or config change. The secret is Terraform-managed in the sibling
+`amilia_calendar_updater_gcp_resources` project (`secrets.tf`, container only); the value is
+set by hand. To switch:
+
+1. Share the new calendar with the function's service account ("Make changes to events") and
+   check it with `scripts/check_access.py` (see `src/shared/calendar_client.py`).
+2. Add the new ID as a new secret version:
+   ```
+   printf '%s' '<calendar-id>@group.calendar.google.com' | \
+     gcloud secrets versions add google-calendar-id --data-file=-
+   ```
+3. Redeploy **both** functions (commands under [CLI](#cli)). Secrets mounted as env vars are
+   read when an instance starts, so a redeploy is what guarantees every instance switches.
+4. **Reset the event store.** Its documents hold calendar event IDs from the *old* calendar,
+   so an Update or Delete would target events that don't exist on the new one. Clear the
+   bucket's documents and re-run the backfill against the new calendar. This is a manual,
+   deliberate step.
+
+To run a script against the configured calendar, read the ID from the secret:
+`GOOGLE_CALENDAR_ID=$(gcloud secrets versions access latest --secret=google-calendar-id)`.
 
 ### Amilia REST API credentials (Program/Activity sync)
 `src/webhook/amilia_client.py` fetches per-occurrence schedule data (Start/End/Location) that Amilia's
@@ -78,9 +133,11 @@ standalone bulk loader that seeds the event store (and creates matching calendar
 - every Program,
 - every Activity whose last occurrence hasn't ended more than `--lookback-days` (default 30) in
   the past — no forward bound, so anything upcoming is always included, and
-- every FacilityBooking (Amilia's `/reservations` endpoint — covers AdminBooking, FacilityBooking,
-  and PrivateLesson reservation types, matching what the live webhook already treats as one
-  `FacilityBooking` context) with a start between `--lookback-days` in the past and
+- every FacilityBooking, **only when `FACILITY_BOOKING_SYNC_ENABLED` is `"true"`** (see
+  [What gets synced](#what-gets-synced); otherwise this phase is skipped). These come from
+  Amilia's `/reservations` endpoint, which covers the AdminBooking, FacilityBooking, and
+  PrivateLesson reservation types, matching what the live webhook treats as one
+  `FacilityBooking` context. Only reservations with a start between `--lookback-days` in the past and
   `--reservation-lookahead-days` (default 730, ~2 years) in the future. Unlike Activities, this
   endpoint requires an explicit forward bound server-side, so there's no true "unbounded" option
   here — `--reservation-lookahead-days` is a practical stand-in. Cancelled reservations are
@@ -111,7 +168,8 @@ live sync, impersonating the function's own service account:
 gcloud auth application-default login \
   --impersonate-service-account=amilia-calendar-updater@cm-calendar-506017.iam.gserviceaccount.com
 
-GOOGLE_CALENDAR_ID=... GOOGLE_EVENT_STORE_BUCKET=... PYTHONPATH=src .venv/bin/python scripts/backfill.py \
+GOOGLE_CALENDAR_ID=$(gcloud secrets versions access latest --secret=google-calendar-id) \
+GOOGLE_EVENT_STORE_BUCKET=... PYTHONPATH=src .venv/bin/python scripts/backfill.py \
   --org-id 17659 --amilia-username <user> --amilia-password <pass> --dry-run
 ```
 Drop `--dry-run` once the preview output looks right.
@@ -183,7 +241,7 @@ gcloud functions deploy amilia-calendar-updater --gen2 --runtime=python312 --reg
     --source=src/webhook --entry-point=amilia_webhook --trigger-http --allow-unauthenticated \
     --service-account=amilia-calendar-updater@cm-calendar-506017.iam.gserviceaccount.com \
     --env-vars-file=env.yaml \
-    --set-secrets="AMILIA_WEBHOOK_TOKEN=amilia-webhook-token:latest,AMILIA_API_USERNAME=amilia-api-username:latest,AMILIA_API_PASSWORD=amilia-api-password:latest"
+    --set-secrets="GOOGLE_CALENDAR_ID=google-calendar-id:latest,AMILIA_WEBHOOK_TOKEN=amilia-webhook-token:latest,AMILIA_API_USERNAME=amilia-api-username:latest,AMILIA_API_PASSWORD=amilia-api-password:latest"
 ```
 
 The reconciliation worker is a second, separate Cloud Function — deploy it too (before the
@@ -194,10 +252,11 @@ command above, the first time, per the ordering note above):
 gcloud functions deploy amilia-activity-reconciler --gen2 --runtime=python312 --region=us-west1 \
     --source=src/reconciler --entry-point=reconcile_activity --trigger-http --no-allow-unauthenticated \
     --service-account=amilia-calendar-updater@cm-calendar-506017.iam.gserviceaccount.com \
-    --env-vars-file=env.yaml
+    --env-vars-file=env.yaml \
+    --set-secrets="GOOGLE_CALENDAR_ID=google-calendar-id:latest"
 ```
-It shares the repo's one `env.yaml` (it only reads `GOOGLE_CALENDAR_ID` and
-`GOOGLE_EVENT_STORE_BUCKET` from it — the other entries are simply unused by this function), but
+It shares the repo's one `env.yaml` (it only reads `GOOGLE_EVENT_STORE_BUCKET` from it, plus
+`GOOGLE_CALENDAR_ID` from the secret — the other entries are simply unused by this function), but
 has its own, smaller `src/reconciler/requirements.txt` — it carries none of the webhook-only
 dependencies (Cloud Tasks client, `requests`). `--no-allow-unauthenticated` is deliberate: only
 Cloud Tasks, via a signed identity token, should ever be able to call it.

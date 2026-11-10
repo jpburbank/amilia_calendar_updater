@@ -50,7 +50,7 @@ from siblings).
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from google.api_core.exceptions import NotFound
 from google.cloud import storage
@@ -88,7 +88,7 @@ class EventStore:
                 pass  # first write for this key — nothing to preserve
             blob.custom_time = new_expiry
 
-        body = {**fields, "updated_at": datetime.now(timezone.utc).isoformat()}
+        body = {**fields, "updated_at": datetime.now(UTC).isoformat()}
         blob.upload_from_string(json.dumps(body), content_type="application/json")
 
     def delete(self, context: str, external_id: str) -> None:

@@ -20,7 +20,12 @@ logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # FacilityBooking: tool bookings, room bookings, and other facility bookings
+#
+# Dormant: only routed when FACILITY_BOOKING_SYNC_ENABLED is "true" (off by
+# default — see shared/feature_flags.py and main.py's _build_handlers). Kept
+# working and tested so it can be switched back on without a rewrite.
 # ---------------------------------------------------------------------------
+
 
 def handle_facility_booking(
     action: str, payload: dict, calendar_client: CalendarClient, event_store: EventStore, **_ignored
@@ -34,7 +39,10 @@ def handle_facility_booking(
             start_iso=payload["Start"],
             end_iso=payload["End"],
             location=(payload.get("Location") or {}).get("Name"),
-            extended_properties={"amilia_type": "FacilityBooking", "amilia_type_id": str(reservation_id)},
+            extended_properties={
+                "amilia_type": "FacilityBooking",
+                "amilia_type_id": str(reservation_id),
+            },
         )
         event_store.set(
             "FacilityBooking",
@@ -56,7 +64,10 @@ def handle_facility_booking(
             start_iso=payload["Start"],
             end_iso=payload["End"],
             location=(payload.get("Location") or {}).get("Name"),
-            extended_properties={"amilia_type": "FacilityBooking", "amilia_type_id": str(reservation_id)},
+            extended_properties={
+                "amilia_type": "FacilityBooking",
+                "amilia_type_id": str(reservation_id),
+            },
         )
         event_store.set(
             "FacilityBooking",
@@ -82,6 +93,7 @@ def handle_facility_booking(
 # Program: a container of related Activities (e.g. a course). Never itself
 # a calendar event — only its Online flag, gating its children, matters.
 # ---------------------------------------------------------------------------
+
 
 def handle_program(
     action: str,
@@ -145,7 +157,9 @@ def handle_program(
     return {"skipped": f"unhandled action {action}"}
 
 
-def _enqueue_reconciliation(event_store: EventStore, task_queue: ReconcileQueue, program_id) -> None:
+def _enqueue_reconciliation(
+    event_store: EventStore, task_queue: ReconcileQueue, program_id
+) -> None:
     """
     Reconciles every known child of this Program against its current
     visibility. A Program's activity list can realistically run into the
@@ -173,6 +187,7 @@ def _delete_activity_events(calendar_client: CalendarClient, activity: dict) -> 
 # Visible on the calendar only when its own Status is "Normal" AND its
 # parent Program's Online flag is true (Program unknown = assumed online).
 # ---------------------------------------------------------------------------
+
 
 def _build_activity_description(payload: dict) -> str | None:
     """

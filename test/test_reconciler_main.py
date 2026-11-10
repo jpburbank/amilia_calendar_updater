@@ -5,8 +5,6 @@ import os
 os.environ.setdefault("GOOGLE_CALENDAR_ID", "test-calendar@group.calendar.google.com")
 os.environ.setdefault("GOOGLE_EVENT_STORE_BUCKET", "test-bucket")
 
-from flask import Flask, request  # noqa: E402
-
 # Both src/webhook/main.py and src/reconciler/main.py are literally named
 # main.py (a Cloud Functions constraint — see either module's docstring),
 # so loading this one by explicit file path with a distinct name avoids a
@@ -14,6 +12,8 @@ from flask import Flask, request  # noqa: E402
 # session — see that file's comment for the full explanation.
 import importlib.util
 from pathlib import Path
+
+from flask import Flask, request  # noqa: E402
 
 _spec = importlib.util.spec_from_file_location(
     "reconciler_main", Path(__file__).parent.parent / "src" / "reconciler" / "main.py"

@@ -95,11 +95,17 @@ def test_set_without_custom_time_leaves_it_unset():
 def test_set_does_not_move_custom_time_earlier():
     store = EventStore(bucket_name="test-bucket", client=_FakeClient())
     store.set(
-        "FacilityBooking", "FB-1", {"calendar_event_id": "evt_123"}, custom_time="2026-06-01T11:00:00"
+        "FacilityBooking",
+        "FB-1",
+        {"calendar_event_id": "evt_123"},
+        custom_time="2026-06-01T11:00:00",
     )
 
     store.set(
-        "FacilityBooking", "FB-1", {"calendar_event_id": "evt_123"}, custom_time="2026-01-01T09:00:00"
+        "FacilityBooking",
+        "FB-1",
+        {"calendar_event_id": "evt_123"},
+        custom_time="2026-01-01T09:00:00",
     )
 
     blob = store._blob("FacilityBooking", "FB-1")

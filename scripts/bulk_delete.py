@@ -36,7 +36,8 @@ as backfill.py:
     gcloud auth application-default login \
       --impersonate-service-account=<SA_EMAIL>
 
-    GOOGLE_CALENDAR_ID=... GOOGLE_EVENT_STORE_BUCKET=... \
+    GOOGLE_CALENDAR_ID=$(gcloud secrets versions access latest --secret=google-calendar-id) \
+    GOOGLE_EVENT_STORE_BUCKET=... \
       PYTHONPATH=src .venv/bin/python scripts/bulk_delete.py \
       --context Activity --program-id 107638
 
@@ -48,7 +49,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import google.auth
@@ -87,7 +88,7 @@ def resolve_targets(event_store: EventStore, context: str, args: argparse.Namesp
     if args.program_id:
         return event_store.list_members("Program", args.program_id, "Activities")
     if args.older_than_days is not None:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=args.older_than_days)
+        cutoff = datetime.now(UTC) - timedelta(days=args.older_than_days)
         matches = []
         for external_id in event_store.list_all(context):
             doc = event_store.get(context, external_id)
@@ -135,7 +136,12 @@ def delete_one(
     calendar failure (recorded instead), so one bad event doesn't abort the
     store deletion or the rest of the run."""
     doc = event_store.get(context, external_id) or {}
-    result = {"id": external_id, "calendar_deleted": [], "calendar_failed": [], "store_deleted": False}
+    result = {
+        "id": external_id,
+        "calendar_deleted": [],
+        "calendar_failed": [],
+        "store_deleted": False,
+    }
 
     if target in ("calendar", "both"):
         for event_id in extract_calendar_event_ids(context, doc):
@@ -154,19 +160,40 @@ def delete_one(
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--context", required=True, choices=CONTEXTS)
 
     selection = parser.add_mutually_exclusive_group(required=True)
-    selection.add_argument("--id", dest="ids", action="append", metavar="EXTERNAL_ID", help="May be repeated.")
-    selection.add_argument("--program-id", help="Every Activity belonging to this Program (--context Activity only).")
-    selection.add_argument("--older-than-days", type=int, help="Every document whose store record is older than this.")
-    selection.add_argument("--all", action="store_true", help="Every document in --context. Still subject to --limit.")
+    selection.add_argument(
+        "--id", dest="ids", action="append", metavar="EXTERNAL_ID", help="May be repeated."
+    )
+    selection.add_argument(
+        "--program-id", help="Every Activity belonging to this Program (--context Activity only)."
+    )
+    selection.add_argument(
+        "--older-than-days", type=int, help="Every document whose store record is older than this."
+    )
+    selection.add_argument(
+        "--all", action="store_true", help="Every document in --context. Still subject to --limit."
+    )
 
     parser.add_argument("--target", choices=["store", "calendar", "both"], default="both")
-    parser.add_argument("--limit", type=int, default=25, help="Refuse to run if the resolved selection exceeds this.")
-    parser.add_argument("--execute", action="store_true", help="Actually delete. Without this, preview only.")
-    parser.add_argument("--confirm-bucket", metavar="BUCKET_NAME", help="Required with --execute: must exactly match GOOGLE_EVENT_STORE_BUCKET.")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=25,
+        help="Refuse to run if the resolved selection exceeds this.",
+    )
+    parser.add_argument(
+        "--execute", action="store_true", help="Actually delete. Without this, preview only."
+    )
+    parser.add_argument(
+        "--confirm-bucket",
+        metavar="BUCKET_NAME",
+        help="Required with --execute: must exactly match GOOGLE_EVENT_STORE_BUCKET.",
+    )
     return parser
 
 
@@ -191,7 +218,7 @@ def main() -> int:
         )
         return 2
 
-    run_started_at = datetime.now(timezone.utc)
+    run_started_at = datetime.now(UTC)
 
     print(f"Authenticating to GCP as: {_identity()}")
     print(f"Target bucket:   {bucket_name}")
@@ -199,7 +226,9 @@ def main() -> int:
     print(f"Context: {args.context}   Target: {args.target}   Selection: {selection_label(args)}")
 
     event_store = EventStore(bucket_name=bucket_name)
-    calendar_client = CalendarClient(calendar_id=calendar_id) if args.target in ("calendar", "both") else None
+    calendar_client = (
+        CalendarClient(calendar_id=calendar_id) if args.target in ("calendar", "both") else None
+    )
 
     targets = resolve_targets(event_store, args.context, args)
     print(f"\nResolved {len(targets)} document(s):")
@@ -219,12 +248,16 @@ def main() -> int:
         return 2
 
     if not args.execute:
-        print("\nDRY RUN — nothing deleted. Re-run with --execute (and --confirm-bucket) to delete.")
+        print(
+            "\nDRY RUN — nothing deleted. Re-run with --execute (and --confirm-bucket) to delete."
+        )
         return 0
 
     AUDIT_LOG_DIR.mkdir(exist_ok=True)
     timestamp = run_started_at.strftime("%Y%m%dT%H%M%SZ")
-    log_path = AUDIT_LOG_DIR / f"{args.context}_{selection_label(args)}_{args.target}_{timestamp}.log"
+    log_path = (
+        AUDIT_LOG_DIR / f"{args.context}_{selection_label(args)}_{args.target}_{timestamp}.log"
+    )
 
     failed = []
     with open(log_path, "w") as log:
@@ -232,21 +265,27 @@ def main() -> int:
         log.write(f"identity={_identity()}\n")
         log.write(f"bucket={bucket_name}\n")
         log.write(f"calendar={calendar_id}\n")
-        log.write(f"context={args.context}\ntarget={args.target}\nselection={selection_label(args)}\n")
+        log.write(
+            f"context={args.context}\ntarget={args.target}\nselection={selection_label(args)}\n"
+        )
         log.write(f"resolved_count={len(targets)}\n---\n")
         log.flush()
 
         print(f"\nAudit log: {log_path}")
         print("Deleting...")
         for external_id in targets:
-            result = delete_one(calendar_client, event_store, args.context, external_id, target=args.target)
+            result = delete_one(
+                calendar_client, event_store, args.context, external_id, target=args.target
+            )
             log.write(f"{external_id}: {result}\n")
             log.flush()
             print(f"  {external_id}: {result}")
             if result["calendar_failed"]:
                 failed.append((external_id, result["calendar_failed"]))
 
-        summary = f"\nDone. {len(targets)} document(s) processed, {len(failed)} with calendar failures.\n"
+        summary = (
+            f"\nDone. {len(targets)} document(s) processed, {len(failed)} with calendar failures.\n"
+        )
         log.write(summary)
         print(summary)
 

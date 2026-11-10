@@ -16,3 +16,7 @@ venv/
 
 # Per-run records written by scripts/bulk_delete.py — see scripts/BULK_DELETE.md.
 /audit_logs/
+
+# Ad-hoc local scratch scripts (e.g. tmp_get_cal_entries.py) — they tend to
+# hardcode real calendar IDs and other environment-specific values.
+/tmp_*.py
