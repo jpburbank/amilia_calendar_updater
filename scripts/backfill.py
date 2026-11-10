@@ -37,7 +37,8 @@ path production does — see scripts/check_access.py for why):
     gcloud auth application-default login \
       --impersonate-service-account=<SA_EMAIL>
 
-    GOOGLE_CALENDAR_ID=... GOOGLE_EVENT_STORE_BUCKET=... \
+    GOOGLE_CALENDAR_ID=$(gcloud secrets versions access latest --secret=google-calendar-id) \
+    GOOGLE_EVENT_STORE_BUCKET=... \
       PYTHONPATH=src .venv/bin/python scripts/backfill.py \
       --org-id 17659 --amilia-username <user> --amilia-password <pass>
 

@@ -38,7 +38,11 @@ Deploy (from the repo root):
     --trigger-http \
     --no-allow-unauthenticated \
     --service-account=amilia-calendar-updater@<PROJECT_ID>.iam.gserviceaccount.com \
-    --env-vars-file=env.yaml
+    --env-vars-file=env.yaml \
+    --set-secrets="GOOGLE_CALENDAR_ID=google-calendar-id:latest"
+
+GOOGLE_CALENDAR_ID comes from the google-calendar-id secret, the same one
+the webhook function mounts. See README.md "Target calendar".
 """
 
 from __future__ import annotations

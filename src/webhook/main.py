@@ -47,6 +47,11 @@ Deploy:
   #      function's first deploy, since RECONCILE_WORKER_URL below needs
   #      its URL.
 
+  # The target calendar ID is the google-calendar-id secret (also from the
+  # Terraform project; the value is set by hand), not an env.yaml entry, so
+  # switching dev/prod calendars is a new secret version plus a redeploy.
+  # See README.md "Target calendar".
+
   # From the repo root:
   ./scripts/build.sh
 
@@ -60,7 +65,7 @@ Deploy:
     --allow-unauthenticated \
     --service-account=amilia-calendar-updater@<PROJECT_ID>.iam.gserviceaccount.com \
     --env-vars-file=env.yaml \
-    --set-secrets="AMILIA_WEBHOOK_TOKEN=amilia-webhook-token:latest,AMILIA_API_USERNAME=amilia-api-username:latest,AMILIA_API_PASSWORD=amilia-api-password:latest"
+    --set-secrets="GOOGLE_CALENDAR_ID=google-calendar-id:latest,AMILIA_WEBHOOK_TOKEN=amilia-webhook-token:latest,AMILIA_API_USERNAME=amilia-api-username:latest,AMILIA_API_PASSWORD=amilia-api-password:latest"
 
 Amilia webhook contract (see /apidocs/ApiDocs/v1webhooks.html):
   POST body: { "OrganizationId", "Context", "Action", "Name", "EventTime", "Payload": {...} }
