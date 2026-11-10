@@ -48,6 +48,30 @@ appended as a query param, e.g. `?token=<value>`, fetched with:
 gcloud secrets versions access latest --secret=amilia-webhook-token
 ```
 
+### Target calendar (switching between dev and prod)
+The calendar both functions write to is the `google-calendar-id` secret, not an `env.yaml`
+entry, so switching calendars (the current one is dev-only; production will use a different one)
+needs no code or config change. The secret is Terraform-managed in the sibling
+`amilia_calendar_updater_gcp_resources` project (`secrets.tf`, container only); the value is
+set by hand. To switch:
+
+1. Share the new calendar with the function's service account ("Make changes to events") and
+   check it with `scripts/check_access.py` (see `src/shared/calendar_client.py`).
+2. Add the new ID as a new secret version:
+   ```
+   printf '%s' '<calendar-id>@group.calendar.google.com' | \
+     gcloud secrets versions add google-calendar-id --data-file=-
+   ```
+3. Redeploy **both** functions (commands under [CLI](#cli)). Secrets mounted as env vars are
+   read when an instance starts, so a redeploy is what guarantees every instance switches.
+4. **Reset the event store.** Its documents hold calendar event IDs from the *old* calendar,
+   so an Update or Delete would target events that don't exist on the new one. Clear the
+   bucket's documents and re-run the backfill against the new calendar. This is a manual,
+   deliberate step.
+
+To run a script against the configured calendar, read the ID from the secret:
+`GOOGLE_CALENDAR_ID=$(gcloud secrets versions access latest --secret=google-calendar-id)`.
+
 ### Amilia REST API credentials (Program/Activity sync)
 `src/webhook/amilia_client.py` fetches per-occurrence schedule data (Start/End/Location) that Amilia's
 webhooks don't carry, using a dedicated Amilia user account rather than the runtime service
@@ -111,7 +135,8 @@ live sync, impersonating the function's own service account:
 gcloud auth application-default login \
   --impersonate-service-account=amilia-calendar-updater@cm-calendar-506017.iam.gserviceaccount.com
 
-GOOGLE_CALENDAR_ID=... GOOGLE_EVENT_STORE_BUCKET=... PYTHONPATH=src .venv/bin/python scripts/backfill.py \
+GOOGLE_CALENDAR_ID=$(gcloud secrets versions access latest --secret=google-calendar-id) \
+GOOGLE_EVENT_STORE_BUCKET=... PYTHONPATH=src .venv/bin/python scripts/backfill.py \
   --org-id 17659 --amilia-username <user> --amilia-password <pass> --dry-run
 ```
 Drop `--dry-run` once the preview output looks right.
@@ -183,7 +208,7 @@ gcloud functions deploy amilia-calendar-updater --gen2 --runtime=python312 --reg
     --source=src/webhook --entry-point=amilia_webhook --trigger-http --allow-unauthenticated \
     --service-account=amilia-calendar-updater@cm-calendar-506017.iam.gserviceaccount.com \
     --env-vars-file=env.yaml \
-    --set-secrets="AMILIA_WEBHOOK_TOKEN=amilia-webhook-token:latest,AMILIA_API_USERNAME=amilia-api-username:latest,AMILIA_API_PASSWORD=amilia-api-password:latest"
+    --set-secrets="GOOGLE_CALENDAR_ID=google-calendar-id:latest,AMILIA_WEBHOOK_TOKEN=amilia-webhook-token:latest,AMILIA_API_USERNAME=amilia-api-username:latest,AMILIA_API_PASSWORD=amilia-api-password:latest"
 ```
 
 The reconciliation worker is a second, separate Cloud Function — deploy it too (before the
@@ -194,10 +219,11 @@ command above, the first time, per the ordering note above):
 gcloud functions deploy amilia-activity-reconciler --gen2 --runtime=python312 --region=us-west1 \
     --source=src/reconciler --entry-point=reconcile_activity --trigger-http --no-allow-unauthenticated \
     --service-account=amilia-calendar-updater@cm-calendar-506017.iam.gserviceaccount.com \
-    --env-vars-file=env.yaml
+    --env-vars-file=env.yaml \
+    --set-secrets="GOOGLE_CALENDAR_ID=google-calendar-id:latest"
 ```
-It shares the repo's one `env.yaml` (it only reads `GOOGLE_CALENDAR_ID` and
-`GOOGLE_EVENT_STORE_BUCKET` from it — the other entries are simply unused by this function), but
+It shares the repo's one `env.yaml` (it only reads `GOOGLE_EVENT_STORE_BUCKET` from it, plus
+`GOOGLE_CALENDAR_ID` from the secret — the other entries are simply unused by this function), but
 has its own, smaller `src/reconciler/requirements.txt` — it carries none of the webhook-only
 dependencies (Cloud Tasks client, `requests`). `--no-allow-unauthenticated` is deliberate: only
 Cloud Tasks, via a signed identity token, should ever be able to call it.

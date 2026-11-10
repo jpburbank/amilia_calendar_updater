@@ -44,7 +44,8 @@ Impersonate the function's own service account, same as `scripts/backfill.py`:
 gcloud auth application-default login \
   --impersonate-service-account=amilia-calendar-updater@cm-calendar-506017.iam.gserviceaccount.com
 
-GOOGLE_CALENDAR_ID=... GOOGLE_EVENT_STORE_BUCKET=... \
+GOOGLE_CALENDAR_ID=$(gcloud secrets versions access latest --secret=google-calendar-id) \
+  GOOGLE_EVENT_STORE_BUCKET=... \
   PYTHONPATH=src .venv/bin/python scripts/bulk_delete.py \
   --context Activity --program-id 107638
 ```
