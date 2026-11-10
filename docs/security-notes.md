@@ -80,6 +80,12 @@ otherwise have to discover:
 - the complete request-handling logic, including exactly what a forged
   webhook would need to contain.
 
+The sibling Terraform repo, `github.com/jpburbank/amilia_calendar_updater_gcp_resources`, is
+**also public**. It publishes the full IAM layout, secret names, and Cloud Tasks queue config.
+Its `terraform.tfstate`, which holds the generated webhook token in plain text, is gitignored
+and was confirmed untracked on 2026-11-10. Keep it that way, or move state to a private GCS
+backend.
+
 None of these are credentials by themselves. Together with the leaked token
 above, they were everything needed to forge webhooks. Also watch for
 accidental commits of local scratch files (see the `tmp_*.py` rule in
@@ -88,8 +94,8 @@ Secret Manager.
 
 ### Options to decide on later
 
-- Make the repository private (simplest; nothing in this project needs to be
-  public).
+- Make both repositories private (simplest; nothing in this project needs to
+  be public).
 - Or keep it public and scrub environment-specific values from docs and
   defaults in favor of placeholders, accepting that git history still holds
   them.
