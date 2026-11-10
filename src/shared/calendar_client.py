@@ -103,9 +103,11 @@ class CalendarClient:
         if "extended_properties" in fields:
             body["extendedProperties"] = {"private": fields["extended_properties"]}
 
-        return self._service.events().patch(
-            calendarId=self.calendar_id, eventId=event_id, body=body
-        ).execute()
+        return (
+            self._service.events()
+            .patch(calendarId=self.calendar_id, eventId=event_id, body=body)
+            .execute()
+        )
 
     def delete_event(self, event_id: str) -> None:
         self._service.events().delete(calendarId=self.calendar_id, eventId=event_id).execute()

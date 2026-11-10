@@ -119,7 +119,9 @@ def test_extract_calendar_event_ids_activity_collects_all_occurrences():
 
 
 def test_extract_calendar_event_ids_facility_booking_single_field():
-    assert extract_calendar_event_ids("FacilityBooking", {"calendar_event_id": "evt_9"}) == ["evt_9"]
+    assert extract_calendar_event_ids("FacilityBooking", {"calendar_event_id": "evt_9"}) == [
+        "evt_9"
+    ]
     assert extract_calendar_event_ids("FacilityBooking", {"calendar_event_id": None}) == []
 
 

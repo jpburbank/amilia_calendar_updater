@@ -257,7 +257,9 @@ def test_backfill_activity_is_idempotent_on_rerun():
     event_store = _FakeEventStore(
         documents={
             ("Activity", 7311901): {
-                "occurrences": {"111": {"start": "s", "end": "e", "calendar_event_id": "evt_existing"}}
+                "occurrences": {
+                    "111": {"start": "s", "end": "e", "calendar_event_id": "evt_existing"}
+                }
             }
         }
     )
@@ -311,7 +313,10 @@ def test_backfill_facility_booking_creates_event_when_new():
             "start_iso": "2026-09-08T11:45:00-07:00",
             "end_iso": "2026-09-08T12:00:00-07:00",
             "location": "Laser",
-            "extended_properties": {"amilia_type": "FacilityBooking", "amilia_type_id": "FB-16905874"},
+            "extended_properties": {
+                "amilia_type": "FacilityBooking",
+                "amilia_type_id": "FB-16905874",
+            },
         }
     ]
     doc = event_store.get("FacilityBooking", "FB-16905874")
@@ -435,7 +440,14 @@ def test_backfill_facility_bookings_does_nothing_when_disabled():
     amilia = _FakeReservationsClient([dict(_RESERVATION)])
     calendar = _FakeCalendarClient()
     failed = backfill_facility_bookings(
-        calendar, _FakeEventStore(), amilia, 17659, "2026-01-01", "2026-12-31", enabled=False, dry_run=False
+        calendar,
+        _FakeEventStore(),
+        amilia,
+        17659,
+        "2026-01-01",
+        "2026-12-31",
+        enabled=False,
+        dry_run=False,
     )
     assert failed == []
     assert amilia.calls == []
@@ -447,7 +459,14 @@ def test_backfill_facility_bookings_imports_reservations_when_enabled(monkeypatc
     amilia = _FakeReservationsClient([dict(_RESERVATION)])
     calendar = _FakeCalendarClient()
     failed = backfill_facility_bookings(
-        calendar, _FakeEventStore(), amilia, 17659, "2026-01-01", "2026-12-31", enabled=True, dry_run=False
+        calendar,
+        _FakeEventStore(),
+        amilia,
+        17659,
+        "2026-01-01",
+        "2026-12-31",
+        enabled=True,
+        dry_run=False,
     )
     assert failed == []
     assert amilia.calls == [(17659, "2026-01-01", "2026-12-31")]

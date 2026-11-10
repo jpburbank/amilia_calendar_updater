@@ -329,15 +329,21 @@ def backfill_facility_booking(
         # Activities -> Occurrences path. Importing it here too would
         # create a second, untracked-by-Program-visibility calendar event
         # for the same real-world session.
-        print(f"  FacilityBooking {reservation_id} {reservation.get('Title')!r}: Type=Activity, skipped")
+        print(
+            f"  FacilityBooking {reservation_id} {reservation.get('Title')!r}: Type=Activity, skipped"
+        )
         return
 
     if reservation.get("IsCancelled"):
-        print(f"  FacilityBooking {reservation_id} {reservation.get('Title')!r}: cancelled, skipped")
+        print(
+            f"  FacilityBooking {reservation_id} {reservation.get('Title')!r}: cancelled, skipped"
+        )
         return
 
     if event_store.get("FacilityBooking", reservation_id) is not None:
-        print(f"  FacilityBooking {reservation_id} {reservation.get('Title')!r}: already tracked, skipped")
+        print(
+            f"  FacilityBooking {reservation_id} {reservation.get('Title')!r}: already tracked, skipped"
+        )
         return
 
     title = reservation.get("Title") or "Facility Booking"
@@ -351,7 +357,10 @@ def backfill_facility_booking(
         start_iso=reservation["Start"],
         end_iso=reservation["End"],
         location=(reservation.get("Location") or {}).get("Name"),
-        extended_properties={"amilia_type": "FacilityBooking", "amilia_type_id": str(reservation_id)},
+        extended_properties={
+            "amilia_type": "FacilityBooking",
+            "amilia_type_id": str(reservation_id),
+        },
     )
     event_store.set(
         "FacilityBooking",
@@ -448,7 +457,9 @@ def main() -> int:
 
     program_online_by_id = {}
     for program in programs:
-        program_online_by_id[program["Id"]] = backfill_program(event_store, program, dry_run=args.dry_run)
+        program_online_by_id[program["Id"]] = backfill_program(
+            event_store, program, dry_run=args.dry_run
+        )
         time.sleep(REQUEST_PACING_SECONDS)
 
     total_activities = 0
@@ -485,9 +496,9 @@ def main() -> int:
     )
 
     from_date = cutoff.strftime("%Y-%m-%d")
-    to_date = (datetime.now(timezone.utc) + timedelta(days=args.reservation_lookahead_days)).strftime(
-        "%Y-%m-%d"
-    )
+    to_date = (
+        datetime.now(timezone.utc) + timedelta(days=args.reservation_lookahead_days)
+    ).strftime("%Y-%m-%d")
     failed.extend(
         backfill_facility_bookings(
             calendar_client,
