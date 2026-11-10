@@ -66,7 +66,7 @@ Deploy:
     --entry-point=amilia_webhook \
     --trigger-http \
     --allow-unauthenticated \
-    --service-account=amilia-calendar-updater@<PROJECT_ID>.iam.gserviceaccount.com \
+    --service-account=<SA_EMAIL> \
     --env-vars-file=env.yaml \
     --set-secrets="GOOGLE_CALENDAR_ID=google-calendar-id:latest,AMILIA_WEBHOOK_TOKEN=amilia-webhook-token:latest,AMILIA_API_USERNAME=amilia-api-username:latest,AMILIA_API_PASSWORD=amilia-api-password:latest"
 
@@ -131,10 +131,11 @@ AMILIA_API_PASSWORD = os.environ["AMILIA_API_PASSWORD"]
 GCP_PROJECT_ID = os.environ["GCP_PROJECT_ID"]
 RECONCILE_QUEUE_ID = os.environ["RECONCILE_QUEUE_ID"]
 RECONCILE_WORKER_URL = os.environ["RECONCILE_WORKER_URL"]
-
-# Fixed for this whole project — see README.md / the sibling Terraform repo.
-_REGION = "us-west1"
-_SERVICE_ACCOUNT_EMAIL = f"amilia-calendar-updater@{GCP_PROJECT_ID}.iam.gserviceaccount.com"
+# The Cloud Tasks queue's region, and the identity Cloud Tasks signs its
+# OIDC token as when calling the reconciler (this function's own runtime
+# service account; Terraform's amilia_calendar_updater_email output).
+RECONCILE_QUEUE_LOCATION = os.environ["RECONCILE_QUEUE_LOCATION"]
+RECONCILE_INVOKER_SERVICE_ACCOUNT = os.environ["RECONCILE_INVOKER_SERVICE_ACCOUNT"]
 
 
 def _build_handlers(facility_booking_enabled: bool) -> dict:
@@ -224,10 +225,10 @@ def _get_task_queue() -> ReconcileQueue:
     if _task_queue is None:
         _task_queue = ReconcileQueue(
             project_id=GCP_PROJECT_ID,
-            location=_REGION,
+            location=RECONCILE_QUEUE_LOCATION,
             queue_id=RECONCILE_QUEUE_ID,
             worker_url=RECONCILE_WORKER_URL,
-            invoker_service_account=_SERVICE_ACCOUNT_EMAIL,
+            invoker_service_account=RECONCILE_INVOKER_SERVICE_ACCOUNT,
         )
     return _task_queue
 
