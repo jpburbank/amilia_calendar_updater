@@ -16,6 +16,10 @@ os.environ.setdefault("AMILIA_API_PASSWORD", "test-password")
 os.environ.setdefault("GCP_PROJECT_ID", "test-project")
 os.environ.setdefault("RECONCILE_QUEUE_ID", "test-queue")
 os.environ.setdefault("RECONCILE_WORKER_URL", "https://example.invalid/reconcile")
+os.environ.setdefault("RECONCILE_QUEUE_LOCATION", "test-region")
+os.environ.setdefault(
+    "RECONCILE_INVOKER_SERVICE_ACCOUNT", "test-sa@test-project.iam.gserviceaccount.com"
+)
 
 # src/webhook/main.py and src/reconciler/main.py are both literally named
 # main.py (a Cloud Functions constraint — see either module's docstring),
@@ -33,6 +37,10 @@ _spec = importlib.util.spec_from_file_location(
 )
 webhook_main = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(webhook_main)  # noqa: E402  (import needs the env vars above set)
+
+# Captured before the autouse fixture below stubs it out, so the queue's
+# configuration wiring can still be tested directly.
+_real_get_task_queue = webhook_main._get_task_queue
 
 app = Flask(__name__)
 
@@ -194,3 +202,18 @@ def test_malformed_payload_is_dropped_at_error_level(caplog, monkeypatch):
 def test_every_status_has_a_log_level():
     """Guards against a new _respond() call site with no level mapped."""
     assert set(webhook_main._LOG_LEVELS) == {"ok", "ignored", "rejected", "skipped", "dropped"}
+
+
+def test_task_queue_is_configured_from_environment(monkeypatch):
+    """Region and invoker identity come from env.yaml, not values baked into the code."""
+    captured = {}
+    monkeypatch.setattr(webhook_main, "ReconcileQueue", lambda **kw: captured.update(kw) or kw)
+    monkeypatch.setattr(webhook_main, "_task_queue", None)
+    _real_get_task_queue()
+    assert captured == {
+        "project_id": "test-project",
+        "location": "test-region",
+        "queue_id": "test-queue",
+        "worker_url": "https://example.invalid/reconcile",
+        "invoker_service_account": "test-sa@test-project.iam.gserviceaccount.com",
+    }
