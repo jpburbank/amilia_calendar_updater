@@ -8,11 +8,15 @@ absorbs the rest via **_ignored rather than declaring every parameter.
 
 from __future__ import annotations
 
+import json
+import logging
+
 from amilia_client import AmiliaClient
 from reconcile_queue import ReconcileQueue
 from shared.calendar_client import CalendarClient
 from shared.event_store import EventStore
 
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # FacilityBooking: tool bookings, room bookings, and other facility bookings
@@ -214,6 +218,16 @@ def handle_activity(
         # piece of information genuinely missing from the webhook, so it's
         # the only REST call this handler makes, once per Create/Update.
         occurrences = amilia_client.get_activity_occurrences(org_id, activity_id)
+        # TEMP DEBUG — remove before merging. Shows whether the REST API
+        # already reflects a schedule change at the moment the webhook
+        # arrives. Filter with: jsonPayload.message:"AMILIA_OCCURRENCES"
+        logger.info(
+            "AMILIA_OCCURRENCES activity_id=%s action=%s count=%d occurrences=%s",
+            activity_id,
+            action,
+            len(occurrences),
+            json.dumps([{k: o.get(k) for k in ("Id", "Start", "End")} for o in occurrences]),
+        )
 
         existing = event_store.get("Activity", activity_id)
         existing_occurrences = (existing or {}).get("occurrences") or {}
