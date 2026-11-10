@@ -1,5 +1,8 @@
 # Amilia Calendar Updater
 
+Open security issues (identified but not yet fixed) are tracked in
+[`docs/security-notes.md`](docs/security-notes.md).
+
 ## Deployment
 
 If changes have been made or for some other reason the Cloud Function needs to be redeployed, and have passed tests, do the following.
