@@ -38,11 +38,12 @@ store namespaces documents by context in the first place — see the
 
 ## Running it
 
-Impersonate the function's own service account, same as `scripts/backfill.py`:
+Impersonate the function's own service account, same as `scripts/backfill.py` (`$SA_EMAIL`: see
+"Deployment variables" in the README):
 
 ```
 gcloud auth application-default login \
-  --impersonate-service-account=amilia-calendar-updater@cm-calendar-506017.iam.gserviceaccount.com
+  --impersonate-service-account=$SA_EMAIL
 
 GOOGLE_CALENDAR_ID=$(gcloud secrets versions access latest --secret=google-calendar-id) \
   GOOGLE_EVENT_STORE_BUCKET=... \

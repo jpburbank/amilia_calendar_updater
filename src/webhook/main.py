@@ -66,7 +66,7 @@ Deploy:
     --entry-point=amilia_webhook \
     --trigger-http \
     --allow-unauthenticated \
-    --service-account=amilia-calendar-updater@<PROJECT_ID>.iam.gserviceaccount.com \
+    --service-account=<SA_EMAIL> \
     --env-vars-file=env.yaml \
     --set-secrets="GOOGLE_CALENDAR_ID=google-calendar-id:latest,AMILIA_WEBHOOK_TOKEN=amilia-webhook-token:latest,AMILIA_API_USERNAME=amilia-api-username:latest,AMILIA_API_PASSWORD=amilia-api-password:latest"
 
