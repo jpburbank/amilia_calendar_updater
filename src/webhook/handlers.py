@@ -13,7 +13,6 @@ from reconcile_queue import ReconcileQueue
 from shared.calendar_client import CalendarClient
 from shared.event_store import EventStore
 
-
 # ---------------------------------------------------------------------------
 # FacilityBooking: tool bookings, room bookings, and other facility bookings
 #

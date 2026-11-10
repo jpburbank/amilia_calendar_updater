@@ -26,8 +26,6 @@ standing to grant itself access, so there is no API path that bootstraps it.
 
 from __future__ import annotations
 
-from typing import Optional
-
 import google.auth
 from googleapiclient.discovery import build
 
@@ -56,9 +54,9 @@ class CalendarClient:
         summary: str,
         start_iso: str,
         end_iso: str,
-        location: Optional[str] = None,
-        description: Optional[str] = None,
-        extended_properties: Optional[dict] = None,
+        location: str | None = None,
+        description: str | None = None,
+        extended_properties: dict | None = None,
     ) -> dict:
         """
         Creates an event and returns the created event resource (contains

@@ -49,7 +49,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import google.auth
@@ -88,7 +88,7 @@ def resolve_targets(event_store: EventStore, context: str, args: argparse.Namesp
     if args.program_id:
         return event_store.list_members("Program", args.program_id, "Activities")
     if args.older_than_days is not None:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=args.older_than_days)
+        cutoff = datetime.now(UTC) - timedelta(days=args.older_than_days)
         matches = []
         for external_id in event_store.list_all(context):
             doc = event_store.get(context, external_id)
@@ -218,7 +218,7 @@ def main() -> int:
         )
         return 2
 
-    run_started_at = datetime.now(timezone.utc)
+    run_started_at = datetime.now(UTC)
 
     print(f"Authenticating to GCP as: {_identity()}")
     print(f"Target bucket:   {bucket_name}")

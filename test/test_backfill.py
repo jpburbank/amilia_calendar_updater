@@ -1,6 +1,6 @@
 """Tests for the standalone backfill script's core logic."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -94,28 +94,28 @@ def test_program_is_online_respects_false():
 
 
 def test_within_lookback_keeps_future_activities_regardless_of_distance():
-    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
-    far_future = (datetime.now(timezone.utc) + timedelta(days=365 * 3)).isoformat()
+    cutoff = datetime.now(UTC) - timedelta(days=30)
+    far_future = (datetime.now(UTC) + timedelta(days=365 * 3)).isoformat()
 
     assert is_within_lookback({"EndDate": far_future}, cutoff) is True
 
 
 def test_within_lookback_keeps_recently_ended_activities():
-    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
-    ten_days_ago = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+    cutoff = datetime.now(UTC) - timedelta(days=30)
+    ten_days_ago = (datetime.now(UTC) - timedelta(days=10)).isoformat()
 
     assert is_within_lookback({"EndDate": ten_days_ago}, cutoff) is True
 
 
 def test_within_lookback_drops_activities_ended_long_ago():
-    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
-    a_year_ago = (datetime.now(timezone.utc) - timedelta(days=365)).isoformat()
+    cutoff = datetime.now(UTC) - timedelta(days=30)
+    a_year_ago = (datetime.now(UTC) - timedelta(days=365)).isoformat()
 
     assert is_within_lookback({"EndDate": a_year_ago}, cutoff) is False
 
 
 def test_within_lookback_keeps_activities_with_no_end_date():
-    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    cutoff = datetime.now(UTC) - timedelta(days=30)
 
     assert is_within_lookback({}, cutoff) is True
 

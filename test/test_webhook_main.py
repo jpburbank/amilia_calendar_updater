@@ -134,7 +134,9 @@ def test_program_and_activity_are_routed_regardless_of_facility_booking_flag():
 
 
 def test_written_event_is_ok(caplog, monkeypatch):
-    handler = lambda **kw: {"reservation_id": 7, "calendar_event_id": "evt_abc"}
+    def handler(**kw):
+        return {"reservation_id": 7, "calendar_event_id": "evt_abc"}
+
     with caplog.at_level(logging.DEBUG):
         status_code, body = call(json_body=booking(), handler=handler, monkeypatch=monkeypatch)
     assert status_code == 200
@@ -146,7 +148,10 @@ def test_written_event_is_ok(caplog, monkeypatch):
 
 def test_handler_writing_nothing_is_skipped_not_ok(caplog, monkeypatch):
     """A no-op booking must not read as success."""
-    handler = lambda **kw: {"reservation_id": 7, "skipped": "no stored event mapping"}
+
+    def handler(**kw):
+        return {"reservation_id": 7, "skipped": "no stored event mapping"}
+
     with caplog.at_level(logging.DEBUG):
         status_code, body = call(
             json_body=booking("Update"), handler=handler, monkeypatch=monkeypatch

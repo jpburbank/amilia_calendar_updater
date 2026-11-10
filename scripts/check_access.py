@@ -21,7 +21,7 @@ Creates and immediately deletes a probe event dated a year in the past.
 
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import google.auth
 import google.auth.transport.requests
@@ -80,7 +80,7 @@ def main() -> int:
         return 1
     print("Read access:  OK")
 
-    start = datetime.now(timezone.utc) - timedelta(days=365)
+    start = datetime.now(UTC) - timedelta(days=365)
     probe_body = {
         "summary": PROBE_SUMMARY,
         "start": {"dateTime": start.isoformat()},

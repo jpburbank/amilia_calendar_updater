@@ -1,7 +1,9 @@
 """Tests for the standalone bulk-delete script's core logic."""
 
 import argparse
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+
+import pytest
 
 from bulk_delete import (
     build_arg_parser,
@@ -82,8 +84,8 @@ def test_resolve_targets_by_program_id_uses_membership():
 
 
 def test_resolve_targets_by_older_than_days():
-    old = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
-    recent = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    old = (datetime.now(UTC) - timedelta(days=60)).isoformat()
+    recent = (datetime.now(UTC) - timedelta(days=1)).isoformat()
     store = _FakeEventStore(
         documents={
             ("Activity", "old"): {"updated_at": old},
@@ -234,8 +236,5 @@ def test_arg_parser_requires_exactly_one_selection_mode():
 def test_arg_parser_rejects_two_selection_modes():
     parser = build_arg_parser()
 
-    try:
+    with pytest.raises(SystemExit):
         parser.parse_args(["--context", "Activity", "--program-id", "107638", "--all"])
-        assert False, "expected SystemExit from argparse mutually exclusive group"
-    except SystemExit:
-        pass
