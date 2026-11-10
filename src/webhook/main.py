@@ -137,7 +137,6 @@ _REGION = "us-west1"
 _SERVICE_ACCOUNT_EMAIL = f"amilia-calendar-updater@{GCP_PROJECT_ID}.iam.gserviceaccount.com"
 
 
-
 def _build_handlers(facility_booking_enabled: bool) -> dict:
     """
     Route by (Context) -> handler function. Each handler is called with the

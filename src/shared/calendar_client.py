@@ -26,8 +26,6 @@ standing to grant itself access, so there is no API path that bootstraps it.
 
 from __future__ import annotations
 
-from typing import Optional
-
 import google.auth
 from googleapiclient.discovery import build
 
@@ -56,9 +54,9 @@ class CalendarClient:
         summary: str,
         start_iso: str,
         end_iso: str,
-        location: Optional[str] = None,
-        description: Optional[str] = None,
-        extended_properties: Optional[dict] = None,
+        location: str | None = None,
+        description: str | None = None,
+        extended_properties: dict | None = None,
     ) -> dict:
         """
         Creates an event and returns the created event resource (contains
@@ -103,9 +101,11 @@ class CalendarClient:
         if "extended_properties" in fields:
             body["extendedProperties"] = {"private": fields["extended_properties"]}
 
-        return self._service.events().patch(
-            calendarId=self.calendar_id, eventId=event_id, body=body
-        ).execute()
+        return (
+            self._service.events()
+            .patch(calendarId=self.calendar_id, eventId=event_id, body=body)
+            .execute()
+        )
 
     def delete_event(self, event_id: str) -> None:
         self._service.events().delete(calendarId=self.calendar_id, eventId=event_id).execute()

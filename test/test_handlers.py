@@ -76,6 +76,7 @@ class _FakeTaskQueue:
 # FacilityBooking
 # ---------------------------------------------------------------------------
 
+
 def _booking_payload(**overrides):
     payload = {
         "ReservationId": "FB-1",
@@ -302,6 +303,7 @@ def test_facility_booking_delete_with_no_mapping_skips():
 # Program
 # ---------------------------------------------------------------------------
 
+
 def _program_payload(**overrides):
     payload = {
         "Id": 107638,
@@ -421,6 +423,7 @@ def test_program_delete_cascades_to_children():
 # Activity
 # ---------------------------------------------------------------------------
 
+
 def _activity_payload(**overrides):
     payload = {
         "Id": 7311901,
@@ -529,7 +532,9 @@ def test_activity_update_sets_amilia_type_extended_properties():
         documents={
             ("Activity", 7311901): {
                 "program_id": 107638,
-                "occurrences": {"141658523": {"start": "s", "end": "e", "calendar_event_id": "evt_old"}},
+                "occurrences": {
+                    "141658523": {"start": "s", "end": "e", "calendar_event_id": "evt_old"}
+                },
             }
         }
     )
@@ -573,7 +578,9 @@ def test_activity_update_passes_description_to_calendar():
         documents={
             ("Activity", 7311901): {
                 "program_id": 107638,
-                "occurrences": {"141658523": {"start": "s", "end": "e", "calendar_event_id": "evt_old"}},
+                "occurrences": {
+                    "141658523": {"start": "s", "end": "e", "calendar_event_id": "evt_old"}
+                },
             }
         }
     )

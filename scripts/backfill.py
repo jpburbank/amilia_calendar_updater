@@ -81,7 +81,7 @@ import argparse
 import os
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import google.auth
 import google.auth.transport.requests
@@ -322,6 +322,7 @@ def backfill_facility_booking(
     calendar_client: CalendarClient, event_store: EventStore, reservation: dict, *, dry_run: bool
 ) -> None:
     reservation_id = reservation["ReservationId"]
+    raw_title = reservation.get("Title")
 
     if reservation.get("Type") == "Activity":
         # A booked session of an Activity, not a standalone facility use —
@@ -329,15 +330,15 @@ def backfill_facility_booking(
         # Activities -> Occurrences path. Importing it here too would
         # create a second, untracked-by-Program-visibility calendar event
         # for the same real-world session.
-        print(f"  FacilityBooking {reservation_id} {reservation.get('Title')!r}: Type=Activity, skipped")
+        print(f"  FacilityBooking {reservation_id} {raw_title!r}: Type=Activity, skipped")
         return
 
     if reservation.get("IsCancelled"):
-        print(f"  FacilityBooking {reservation_id} {reservation.get('Title')!r}: cancelled, skipped")
+        print(f"  FacilityBooking {reservation_id} {raw_title!r}: cancelled, skipped")
         return
 
     if event_store.get("FacilityBooking", reservation_id) is not None:
-        print(f"  FacilityBooking {reservation_id} {reservation.get('Title')!r}: already tracked, skipped")
+        print(f"  FacilityBooking {reservation_id} {raw_title!r}: already tracked, skipped")
         return
 
     title = reservation.get("Title") or "Facility Booking"
@@ -351,7 +352,10 @@ def backfill_facility_booking(
         start_iso=reservation["Start"],
         end_iso=reservation["End"],
         location=(reservation.get("Location") or {}).get("Name"),
-        extended_properties={"amilia_type": "FacilityBooking", "amilia_type_id": str(reservation_id)},
+        extended_properties={
+            "amilia_type": "FacilityBooking",
+            "amilia_type_id": str(reservation_id),
+        },
     )
     event_store.set(
         "FacilityBooking",
@@ -415,8 +419,9 @@ def main() -> int:
         "--reservation-lookahead-days",
         type=int,
         default=730,
-        help="End of the FacilityBooking date range — how far into the future to fetch reservations "
-        "(the /reservations endpoint requires an explicit bound; there's no true 'unbounded').",
+        help="End of the FacilityBooking date range — how far into the future to fetch "
+        "reservations (the /reservations endpoint requires an explicit bound; there's no true "
+        "'unbounded').",
     )
     parser.add_argument(
         "--dry-run",
@@ -440,7 +445,7 @@ def main() -> int:
     calendar_client = CalendarClient(calendar_id=calendar_id)
     event_store = EventStore(bucket_name=bucket_name)
     amilia = _AmiliaRestClient(args.amilia_username, args.amilia_password)
-    cutoff = datetime.now(timezone.utc) - timedelta(days=args.lookback_days)
+    cutoff = datetime.now(UTC) - timedelta(days=args.lookback_days)
 
     print("\nFetching programs...")
     programs = amilia.get_programs(args.org_id)
@@ -448,7 +453,9 @@ def main() -> int:
 
     program_online_by_id = {}
     for program in programs:
-        program_online_by_id[program["Id"]] = backfill_program(event_store, program, dry_run=args.dry_run)
+        program_online_by_id[program["Id"]] = backfill_program(
+            event_store, program, dry_run=args.dry_run
+        )
         time.sleep(REQUEST_PACING_SECONDS)
 
     total_activities = 0
@@ -485,7 +492,7 @@ def main() -> int:
     )
 
     from_date = cutoff.strftime("%Y-%m-%d")
-    to_date = (datetime.now(timezone.utc) + timedelta(days=args.reservation_lookahead_days)).strftime(
+    to_date = (datetime.now(UTC) + timedelta(days=args.reservation_lookahead_days)).strftime(
         "%Y-%m-%d"
     )
     failed.extend(

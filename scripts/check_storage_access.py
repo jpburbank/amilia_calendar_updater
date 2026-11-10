@@ -20,7 +20,7 @@ Writes, reads back, and deletes a probe object.
 
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import google.auth
 import google.auth.transport.requests
@@ -70,7 +70,7 @@ def main() -> int:
 
     bucket = storage.Client(credentials=credentials).bucket(bucket_name)
     blob = bucket.blob(PROBE_OBJECT_NAME)
-    blob.custom_time = datetime.now(timezone.utc) + timedelta(days=1)
+    blob.custom_time = datetime.now(UTC) + timedelta(days=1)
 
     try:
         blob.upload_from_string(PROBE_BODY, content_type="application/json")
