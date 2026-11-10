@@ -114,6 +114,25 @@ def test_registration_context_is_ignored(caplog):
     assert caplog.records[-1].levelno == logging.INFO
 
 
+def test_facility_booking_context_is_ignored_by_default(caplog):
+    """FACILITY_BOOKING_SYNC_ENABLED is unset in tests, so the flag's default (off) applies."""
+    with caplog.at_level(logging.DEBUG):
+        status_code, body = call(json_body=booking())
+    assert status_code == 200
+    assert body["status"] == "ignored"
+    assert body["context"] == "FacilityBooking"
+
+
+def test_facility_booking_handler_is_routed_only_when_enabled():
+    assert "FacilityBooking" in webhook_main._build_handlers(facility_booking_enabled=True)
+    assert "FacilityBooking" not in webhook_main._build_handlers(facility_booking_enabled=False)
+
+
+def test_program_and_activity_are_routed_regardless_of_facility_booking_flag():
+    for enabled in (True, False):
+        assert {"Program", "Activity"} <= webhook_main._build_handlers(enabled).keys()
+
+
 def test_written_event_is_ok(caplog, monkeypatch):
     handler = lambda **kw: {"reservation_id": 7, "calendar_event_id": "evt_abc"}
     with caplog.at_level(logging.DEBUG):

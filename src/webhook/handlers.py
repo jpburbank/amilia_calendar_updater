@@ -16,6 +16,10 @@ from shared.event_store import EventStore
 
 # ---------------------------------------------------------------------------
 # FacilityBooking: tool bookings, room bookings, and other facility bookings
+#
+# Dormant: only routed when FACILITY_BOOKING_SYNC_ENABLED is "true" (off by
+# default — see shared/feature_flags.py and main.py's _build_handlers). Kept
+# working and tested so it can be switched back on without a rewrite.
 # ---------------------------------------------------------------------------
 
 def handle_facility_booking(
