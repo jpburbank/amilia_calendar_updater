@@ -90,6 +90,7 @@ import requests
 from shared.calendar_client import CalendarClient
 from shared.event_store import EventStore
 from shared.feature_flags import facility_booking_sync_enabled
+from shared.titles import clean_title
 
 AUTHENTICATE_URL = "https://www.amilia.com/api/V3/authenticate"
 API_BASE_URL = "https://app.amilia.com/api/v3/en"
@@ -205,7 +206,7 @@ def backfill_program(event_store: EventStore, program: dict, *, dry_run: bool) -
             "Program",
             program["Id"],
             {
-                "name": program.get("Name"),
+                "name": clean_title(program.get("Name")),
                 "online": online,
                 "start_date": program.get("Start"),
                 "expiration_date": program.get("End"),
@@ -256,7 +257,7 @@ def backfill_activity(
 
     occurrences = amilia.get_activity_occurrences(org_id, activity_id)
     location = activity.get("LocationLabel") or None
-    summary = activity.get("Name", "Activity")
+    summary = clean_title(activity.get("Name"), "Activity")
     description = build_activity_description(activity)
     extended_properties = {"amilia_type": "Activity", "amilia_type_id": str(activity_id)}
 
@@ -302,7 +303,7 @@ def backfill_activity(
         "Activity",
         activity_id,
         {
-            "name": activity.get("Name"),
+            "name": clean_title(activity.get("Name")),
             "program_id": program_id,
             "category_id": activity.get("CategoryId") or None,
             "category_name": activity.get("CategoryName"),
@@ -341,7 +342,7 @@ def backfill_facility_booking(
         print(f"  FacilityBooking {reservation_id} {raw_title!r}: already tracked, skipped")
         return
 
-    title = reservation.get("Title") or "Facility Booking"
+    title = clean_title(reservation.get("Title"), "Facility Booking")
     print(f"  FacilityBooking {reservation_id} {title!r}: creating")
 
     if dry_run:

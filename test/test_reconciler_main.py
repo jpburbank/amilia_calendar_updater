@@ -170,3 +170,29 @@ def test_program_unknown_is_assumed_online(monkeypatch):
 
     assert body["visible"] is True
     assert len(calendar_client.calls) == 1
+
+
+def test_stored_name_is_trimmed_for_the_calendar(monkeypatch):
+    """Documents stored before titles were trimmed still carry stray spaces."""
+    event_store = _FakeEventStore(
+        documents={
+            ("Program", 107638): {"online": True},
+            ("Activity", "111"): {
+                "program_id": 107638,
+                "status": "Normal",
+                "name": "Bandsaw Bear Claws  ",
+                "occurrences": {
+                    "a": {
+                        "start": "2026-09-25T12:46:00-07:00",
+                        "end": "2026-09-25T13:46:00-07:00",
+                        "calendar_event_id": None,
+                    }
+                },
+            },
+        }
+    )
+    calendar_client = _FakeCalendarClient()
+
+    _call("111", monkeypatch, calendar_client, event_store)
+
+    assert calendar_client.calls[0]["summary"] == "Bandsaw Bear Claws"

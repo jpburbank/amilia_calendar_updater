@@ -12,6 +12,7 @@ from amilia_client import AmiliaClient
 from reconcile_queue import ReconcileQueue
 from shared.calendar_client import CalendarClient
 from shared.event_store import EventStore
+from shared.titles import clean_title
 
 # ---------------------------------------------------------------------------
 # FacilityBooking: tool bookings, room bookings, and other facility bookings
@@ -28,7 +29,7 @@ def handle_facility_booking(
     reservation_id = payload.get("ReservationId")
 
     if action == "Create":
-        title = payload.get("Title") or "Facility Booking"
+        title = clean_title(payload.get("Title"), "Facility Booking")
         event = calendar_client.create_event(
             summary=f"{title} booking",
             start_iso=payload["Start"],
@@ -52,7 +53,7 @@ def handle_facility_booking(
         if existing is None:
             return {"reservation_id": reservation_id, "skipped": "no stored event mapping"}
         event_id = existing["calendar_event_id"]
-        title = payload.get("Title") or "Facility Booking"
+        title = clean_title(payload.get("Title"), "Facility Booking")
         calendar_client.update_event(
             event_id,
             summary=f"{title} booking",
@@ -106,7 +107,7 @@ def handle_program(
             "Program",
             program_id,
             {
-                "name": payload.get("Name"),
+                "name": clean_title(payload.get("Name")),
                 "online": online,
                 "start_date": payload.get("StartDate"),
                 "expiration_date": payload.get("ExpirationDate"),
@@ -125,7 +126,7 @@ def handle_program(
             "Program",
             program_id,
             {
-                "name": payload.get("Name"),
+                "name": clean_title(payload.get("Name")),
                 "online": online,
                 "start_date": payload.get("StartDate"),
                 "expiration_date": payload.get("ExpirationDate"),
@@ -233,7 +234,7 @@ def handle_activity(
         existing_occurrences = (existing or {}).get("occurrences") or {}
 
         location = payload.get("LocationLabel") or None
-        summary = payload.get("Name", "Activity")
+        summary = clean_title(payload.get("Name"), "Activity")
         description = _build_activity_description(payload)
         extended_properties = {"amilia_type": "Activity", "amilia_type_id": str(activity_id)}
 
@@ -298,7 +299,7 @@ def handle_activity(
             "Activity",
             activity_id,
             {
-                "name": payload.get("Name"),
+                "name": clean_title(payload.get("Name")),
                 "program_id": program_id,
                 "category_id": payload.get("CategoryId") or None,
                 "category_name": payload.get("CategoryName"),

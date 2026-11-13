@@ -100,6 +100,19 @@ def test_facility_booking_create_appends_booking_to_title():
     assert calendar_client.calls[0]["summary"] == "Laser booking"
 
 
+def test_facility_booking_create_trims_title_whitespace():
+    calendar_client = _FakeCalendarClient()
+
+    handle_facility_booking(
+        action="Create",
+        payload=_booking_payload(Title="  Laser  "),
+        calendar_client=calendar_client,
+        event_store=_FakeEventStore(),
+    )
+
+    assert calendar_client.calls[0]["summary"] == "Laser booking"
+
+
 def test_facility_booking_create_appends_booking_to_default_title():
     calendar_client = _FakeCalendarClient()
 
@@ -113,7 +126,7 @@ def test_facility_booking_create_appends_booking_to_default_title():
     assert calendar_client.calls[0]["summary"] == "Facility Booking booking"
 
 
-@pytest.mark.parametrize("title", [None, ""])
+@pytest.mark.parametrize("title", [None, "", "   "])
 def test_facility_booking_create_uses_default_title_when_title_is_blank(title):
     """Amilia sends Title as null/empty, not missing, on untitled admin bookings."""
     calendar_client = _FakeCalendarClient()
@@ -334,6 +347,20 @@ def test_program_create_stores_document():
     assert result == {"program_id": 107638, "online": True}
 
 
+def test_program_create_trims_name_whitespace():
+    event_store = _FakeEventStore()
+
+    handle_program(
+        action="Create",
+        payload=_program_payload(Name="  Classes and Workshops  "),
+        calendar_client=_FakeCalendarClient(),
+        event_store=event_store,
+        task_queue=_FakeTaskQueue(),
+    )
+
+    assert event_store.get("Program", 107638)["name"] == "Classes and Workshops"
+
+
 def test_program_create_reconciles_activities_that_arrived_first():
     """An Activity's Create can beat its Program's Create — catch it on Program Create."""
     event_store = _FakeEventStore(memberships={("Program", 107638, "Activities", "7311901")})
@@ -467,6 +494,25 @@ def test_activity_create_with_unknown_program_is_visible_by_default():
     doc = event_store.get("Activity", 7311901)
     assert doc["occurrences"]["141658523"]["calendar_event_id"] == "evt_1"
     assert ("Program", 107638, "Activities", 7311901) in event_store.memberships
+
+
+@pytest.mark.parametrize("action", ["Create", "Update"])
+def test_activity_trims_name_whitespace_for_calendar_and_store(action):
+    """Live Amilia names carry stray spaces, e.g. "*Bandsaw Bear Claws  "."""
+    calendar_client = _FakeCalendarClient()
+    event_store = _FakeEventStore()
+
+    handle_activity(
+        action=action,
+        payload=_activity_payload(Name="  *Bandsaw Bear Claws  "),
+        calendar_client=calendar_client,
+        event_store=event_store,
+        org_id=17659,
+        amilia_client=_FakeAmiliaClient(occurrences=_ONE_OCCURRENCE),
+    )
+
+    assert calendar_client.calls[0]["summary"] == "*Bandsaw Bear Claws"
+    assert event_store.get("Activity", 7311901)["name"] == "*Bandsaw Bear Claws"
 
 
 def test_activity_create_with_offline_program_is_not_visible():
