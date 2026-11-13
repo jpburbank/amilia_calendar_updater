@@ -21,6 +21,22 @@ FacilityBooking calendar events and event-store documents in place: they are no 
 or deleted, so clear them manually if they shouldn't stay. The flag lives in
 `src/shared/feature_flags.py`.
 
+**Titles are trimmed.** Leading and trailing whitespace is stripped from every Program/Activity
+name and FacilityBooking title before it's stored or used as a calendar event title (Amilia keeps
+stray spaces exactly as typed, e.g. `"Bandsaw Bear Claws  "`). A blank title falls back to the
+default (`Activity`, `Facility Booking`). Titles are display-only; nothing looks a record up by
+name. Events created earlier keep their untrimmed title until their Activity is next updated or
+re-synced. See `src/shared/titles.py`.
+
+**Redelivered and out-of-order webhooks are skipped.** Amilia delivers at least once and can
+replay an old webhook minutes later, after newer ones (seen live: a redelivered Activity Create
+reverted a rename that had already synced). Each event-store document records the `EventTime` of
+the webhook that last wrote it (`last_event_time`); a webhook whose `EventTime` isn't newer is
+answered `status=skipped reason=stale event` (HTTP 200) and changes nothing. A webhook with no
+usable `EventTime`, or a document without `last_event_time` (e.g. written by the backfill), is
+processed normally. Known gap: after a Delete removes a document, a replayed older Create for the
+same ID has nothing to compare against and is applied.
+
 ## Deployment
 
 If changes have been made or for some other reason the Cloud Function needs to be redeployed, and have passed tests, do the following.

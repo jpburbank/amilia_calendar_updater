@@ -55,6 +55,7 @@ from flask import Request, jsonify
 
 from shared.calendar_client import CalendarClient
 from shared.event_store import EventStore
+from shared.titles import clean_title
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -108,7 +109,7 @@ def reconcile_activity(request: Request):
         calendar_event_id = occurrence.get("calendar_event_id")
         if visible and not calendar_event_id:
             event = calendar_client.create_event(
-                summary=activity.get("name", "Activity"),
+                summary=clean_title(activity.get("name"), "Activity"),
                 start_iso=occurrence["start"],
                 end_iso=occurrence["end"],
                 location=activity.get("location"),

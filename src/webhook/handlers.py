@@ -1,22 +1,68 @@
 """
 Per-context handlers. Each maps an Amilia webhook payload to a Google
 Calendar operation. main.py calls every handler with the same full set of
-keyword arguments (action, payload, calendar_client, event_store, org_id,
-amilia_client, task_queue); a handler that doesn't need some of them just
-absorbs the rest via **_ignored rather than declaring every parameter.
+keyword arguments (action, payload, event_time, calendar_client,
+event_store, org_id, amilia_client, task_queue); a handler that doesn't need
+some of them just absorbs the rest via **_ignored rather than declaring
+every parameter.
+
+Stale deliveries: Amilia delivers at least once and can replay an old
+webhook after a newer one (seen live 2026-11-13: an Activity Create was
+redelivered six minutes later, after an Update, and reverted the rename).
+Every stored document records the EventTime of the webhook that last wrote
+it (last_event_time), and a webhook whose EventTime is not newer than that
+is skipped, which also drops exact duplicate deliveries.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 
 from amilia_client import AmiliaClient
 from reconcile_queue import ReconcileQueue
 from shared.calendar_client import CalendarClient
 from shared.event_store import EventStore
+from shared.titles import clean_title
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_event_time(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        logger.warning("unparseable EventTime %r; not checking for staleness", value)
+        return None
+
+
+def _stale_skip(existing: dict | None, event_time: str | None, **ids) -> dict | None:
+    """
+    Returns a "skipped" result when this webhook is no newer than the one
+    that last wrote `existing`, else None. A missing or unparseable time on
+    either side never counts as stale (fail open: process the webhook).
+    """
+    incoming = _parse_event_time(event_time)
+    stored = _parse_event_time((existing or {}).get("last_event_time"))
+    if incoming is None or stored is None or incoming > stored:
+        return None
+    return {
+        **ids,
+        "skipped": "stale event",
+        "event_time": event_time,
+        "last_event_time": existing["last_event_time"],
+    }
+
+
+def _last_event_time(existing: dict | None, event_time: str | None) -> str | None:
+    """The value to store: this webhook's EventTime, or the previous one if it has none."""
+    if _parse_event_time(event_time) is not None:
+        return event_time
+    return (existing or {}).get("last_event_time")
+
 
 # ---------------------------------------------------------------------------
 # FacilityBooking: tool bookings, room bookings, and other facility bookings
@@ -28,12 +74,21 @@ logger = logging.getLogger(__name__)
 
 
 def handle_facility_booking(
-    action: str, payload: dict, calendar_client: CalendarClient, event_store: EventStore, **_ignored
+    action: str,
+    payload: dict,
+    calendar_client: CalendarClient,
+    event_store: EventStore,
+    event_time: str | None = None,
+    **_ignored,
 ) -> dict:
     reservation_id = payload.get("ReservationId")
 
     if action == "Create":
-        title = payload.get("Title") or "Facility Booking"
+        existing = event_store.get("FacilityBooking", reservation_id)
+        stale = _stale_skip(existing, event_time, reservation_id=reservation_id)
+        if stale:
+            return stale
+        title = clean_title(payload.get("Title"), "Facility Booking")
         event = calendar_client.create_event(
             summary=f"{title} booking",
             start_iso=payload["Start"],
@@ -47,7 +102,11 @@ def handle_facility_booking(
         event_store.set(
             "FacilityBooking",
             reservation_id,
-            {"calendar_event_id": event["id"], "action": "Create"},
+            {
+                "calendar_event_id": event["id"],
+                "action": "Create",
+                "last_event_time": _last_event_time(existing, event_time),
+            },
             custom_time=payload["End"],
         )
         return {"reservation_id": reservation_id, "calendar_event_id": event["id"]}
@@ -56,8 +115,11 @@ def handle_facility_booking(
         existing = event_store.get("FacilityBooking", reservation_id)
         if existing is None:
             return {"reservation_id": reservation_id, "skipped": "no stored event mapping"}
+        stale = _stale_skip(existing, event_time, reservation_id=reservation_id)
+        if stale:
+            return stale
         event_id = existing["calendar_event_id"]
-        title = payload.get("Title") or "Facility Booking"
+        title = clean_title(payload.get("Title"), "Facility Booking")
         calendar_client.update_event(
             event_id,
             summary=f"{title} booking",
@@ -72,7 +134,11 @@ def handle_facility_booking(
         event_store.set(
             "FacilityBooking",
             reservation_id,
-            {"calendar_event_id": event_id, "action": "Update"},
+            {
+                "calendar_event_id": event_id,
+                "action": "Update",
+                "last_event_time": _last_event_time(existing, event_time),
+            },
             custom_time=payload["End"],
         )
         return {"reservation_id": reservation_id, "calendar_event_id": event_id, "updated": True}
@@ -82,6 +148,9 @@ def handle_facility_booking(
         existing = event_store.get("FacilityBooking", deleted_id)
         if existing is None:
             return {"reservation_id": deleted_id, "skipped": "no stored event mapping"}
+        stale = _stale_skip(existing, event_time, reservation_id=deleted_id)
+        if stale:
+            return stale
         calendar_client.delete_event(existing["calendar_event_id"])
         event_store.delete("FacilityBooking", deleted_id)
         return {"reservation_id": deleted_id, "deleted": True}
@@ -101,20 +170,26 @@ def handle_program(
     calendar_client: CalendarClient,
     event_store: EventStore,
     task_queue: ReconcileQueue,
+    event_time: str | None = None,
     **_ignored,
 ) -> dict:
     program_id = payload.get("Id")
 
     if action == "Create":
+        previous = event_store.get("Program", program_id)
+        stale = _stale_skip(previous, event_time, program_id=program_id)
+        if stale:
+            return stale
         online = payload.get("Online", True)
         event_store.set(
             "Program",
             program_id,
             {
-                "name": payload.get("Name"),
+                "name": clean_title(payload.get("Name")),
                 "online": online,
                 "start_date": payload.get("StartDate"),
                 "expiration_date": payload.get("ExpirationDate"),
+                "last_event_time": _last_event_time(previous, event_time),
             },
         )
         # Catches Activities whose own Create webhook arrived before this
@@ -124,16 +199,20 @@ def handle_program(
 
     if action == "Update":
         previous = event_store.get("Program", program_id)
+        stale = _stale_skip(previous, event_time, program_id=program_id)
+        if stale:
+            return stale
         was_online = previous.get("online") if previous else None
         online = payload.get("Online", True)
         event_store.set(
             "Program",
             program_id,
             {
-                "name": payload.get("Name"),
+                "name": clean_title(payload.get("Name")),
                 "online": online,
                 "start_date": payload.get("StartDate"),
                 "expiration_date": payload.get("ExpirationDate"),
+                "last_event_time": _last_event_time(previous, event_time),
             },
         )
         if online != was_online:
@@ -144,6 +223,11 @@ def handle_program(
         # Amilia fires Delete when a program is archived. Cascade: every
         # child Activity's calendar events and own document go too — Amilia
         # does not separately notify us about each child.
+        stale = _stale_skip(
+            event_store.get("Program", program_id), event_time, program_id=program_id
+        )
+        if stale:
+            return stale
         activity_ids = event_store.list_members("Program", program_id, "Activities")
         for activity_id in activity_ids:
             activity = event_store.get("Activity", activity_id)
@@ -217,10 +301,16 @@ def handle_activity(
     event_store: EventStore,
     org_id,
     amilia_client: AmiliaClient,
+    event_time: str | None = None,
     **_ignored,
 ) -> dict:
     if action in ("Create", "Update"):
         activity_id = payload.get("Id")
+        # Checked before the REST call below, so a stale replay costs nothing.
+        existing = event_store.get("Activity", activity_id)
+        stale = _stale_skip(existing, event_time, activity_id=activity_id)
+        if stale:
+            return stale
         program_id = payload.get("ProgramId") or None  # Amilia uses 0 for "no program"
         status = payload.get("Status")
 
@@ -244,11 +334,10 @@ def handle_activity(
             json.dumps([{k: o.get(k) for k in ("Id", "Start", "End")} for o in occurrences]),
         )
 
-        existing = event_store.get("Activity", activity_id)
         existing_occurrences = (existing or {}).get("occurrences") or {}
 
         location = payload.get("LocationLabel") or None
-        summary = payload.get("Name", "Activity")
+        summary = clean_title(payload.get("Name"), "Activity")
         description = _build_activity_description(payload)
         extended_properties = {"amilia_type": "Activity", "amilia_type_id": str(activity_id)}
 
@@ -313,7 +402,7 @@ def handle_activity(
             "Activity",
             activity_id,
             {
-                "name": payload.get("Name"),
+                "name": clean_title(payload.get("Name")),
                 "program_id": program_id,
                 "category_id": payload.get("CategoryId") or None,
                 "category_name": payload.get("CategoryName"),
@@ -324,6 +413,7 @@ def handle_activity(
                 "end_date": payload.get("EndDate"),
                 "location": location,
                 "occurrences": occurrence_map,
+                "last_event_time": _last_event_time(existing, event_time),
             },
             custom_time=payload.get("EndDate"),
         )
@@ -338,6 +428,9 @@ def handle_activity(
         existing = event_store.get("Activity", deleted_id)
         if existing is None:
             return {"activity_id": deleted_id, "skipped": "no stored activity"}
+        stale = _stale_skip(existing, event_time, activity_id=deleted_id)
+        if stale:
+            return stale
         _delete_activity_events(calendar_client, existing)
         program_id = existing.get("program_id")
         if program_id:
