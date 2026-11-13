@@ -46,7 +46,7 @@ path production does — see scripts/check_access.py for why):
     GOOGLE_CALENDAR_ID=$(gcloud secrets versions access latest --secret=google-calendar-id) \
     GOOGLE_EVENT_STORE_BUCKET=... \
       PYTHONPATH=src .venv/bin/python scripts/backfill.py \
-      --org-id 17659 --amilia-username <user> --amilia-password <pass>
+      --org-id <ORG_ID> --amilia-username <user> --amilia-password <pass>
 
 Add --dry-run first to preview what would happen without writing anything.
 

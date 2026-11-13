@@ -25,6 +25,22 @@ or deleted, so clear them manually if they shouldn't stay. The flag lives in
 
 If changes have been made or for some other reason the Cloud Function needs to be redeployed, and have passed tests, do the following.
 
+### Deployment variables
+Every command in this README uses shell variables instead of real project values, so nothing
+environment-specific is baked into the docs or code. Set them once per shell, from the
+Terraform project's outputs and your Amilia org:
+```
+cd ../amilia_calendar_updater_gcp_resources
+export REGION=$(terraform output -raw function_region)
+export SA_EMAIL=$(terraform output -raw amilia_calendar_updater_email)
+cd -
+export AMILIA_ORG_ID=<Amilia OrganizationId>
+```
+The functions themselves read their configuration from `env.yaml` (see `env.yaml.example`) and
+Secret Manager (`--set-secrets`), never from constants in the code. `env.yaml` holds the
+project ID, bucket, Cloud Tasks queue ID/region/worker URL, the reconciler invoker identity
+(`RECONCILE_INVOKER_SERVICE_ACCOUNT`, normally `$SA_EMAIL`), and feature flags.
+
 ### Dependencies
 A Cloud Function deployment has the following requirements.
 
@@ -166,11 +182,11 @@ anything from `src/webhook/` — see its own module docstring for why. Run once,
 live sync, impersonating the function's own service account:
 ```
 gcloud auth application-default login \
-  --impersonate-service-account=amilia-calendar-updater@cm-calendar-506017.iam.gserviceaccount.com
+  --impersonate-service-account=$SA_EMAIL
 
 GOOGLE_CALENDAR_ID=$(gcloud secrets versions access latest --secret=google-calendar-id) \
 GOOGLE_EVENT_STORE_BUCKET=... PYTHONPATH=src .venv/bin/python scripts/backfill.py \
-  --org-id 17659 --amilia-username <user> --amilia-password <pass> --dry-run
+  --org-id $AMILIA_ORG_ID --amilia-username <user> --amilia-password <pass> --dry-run
 ```
 Drop `--dry-run` once the preview output looks right.
 
@@ -237,9 +253,9 @@ From the root of the project:
 ```
 ./scripts/build.sh
 
-gcloud functions deploy amilia-calendar-updater --gen2 --runtime=python312 --region=us-west1 \
+gcloud functions deploy amilia-calendar-updater --gen2 --runtime=python312 --region=$REGION \
     --source=src/webhook --entry-point=amilia_webhook --trigger-http --allow-unauthenticated \
-    --service-account=amilia-calendar-updater@cm-calendar-506017.iam.gserviceaccount.com \
+    --service-account=$SA_EMAIL \
     --env-vars-file=env.yaml \
     --set-secrets="GOOGLE_CALENDAR_ID=google-calendar-id:latest,AMILIA_WEBHOOK_TOKEN=amilia-webhook-token:latest,AMILIA_API_USERNAME=amilia-api-username:latest,AMILIA_API_PASSWORD=amilia-api-password:latest"
 ```
@@ -249,9 +265,9 @@ command above, the first time, per the ordering note above):
 ```
 ./scripts/build.sh
 
-gcloud functions deploy amilia-activity-reconciler --gen2 --runtime=python312 --region=us-west1 \
+gcloud functions deploy amilia-activity-reconciler --gen2 --runtime=python312 --region=$REGION \
     --source=src/reconciler --entry-point=reconcile_activity --trigger-http --no-allow-unauthenticated \
-    --service-account=amilia-calendar-updater@cm-calendar-506017.iam.gserviceaccount.com \
+    --service-account=$SA_EMAIL \
     --env-vars-file=env.yaml \
     --set-secrets="GOOGLE_CALENDAR_ID=google-calendar-id:latest"
 ```

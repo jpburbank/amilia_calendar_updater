@@ -37,7 +37,7 @@ Deploy (from the repo root):
     --entry-point=reconcile_activity \
     --trigger-http \
     --no-allow-unauthenticated \
-    --service-account=amilia-calendar-updater@<PROJECT_ID>.iam.gserviceaccount.com \
+    --service-account=<SA_EMAIL> \
     --env-vars-file=env.yaml \
     --set-secrets="GOOGLE_CALENDAR_ID=google-calendar-id:latest"
 
