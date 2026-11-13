@@ -731,3 +731,230 @@ def test_activity_delete_with_no_stored_activity_skips():
     )
 
     assert result == {"activity_id": 7311901, "skipped": "no stored activity"}
+
+
+# ---------------------------------------------------------------------------
+# Stale deliveries (EventTime not newer than the stored last_event_time)
+# ---------------------------------------------------------------------------
+
+_EARLIER = "2026-11-13T12:35:01.4348239-05:00"
+_LATER = "2026-11-13T12:40:28.1983443-05:00"
+
+
+def test_activity_create_stores_last_event_time():
+    event_store = _FakeEventStore()
+
+    handle_activity(
+        action="Create",
+        payload=_activity_payload(),
+        event_time=_EARLIER,
+        calendar_client=_FakeCalendarClient(),
+        event_store=event_store,
+        org_id=17659,
+        amilia_client=_FakeAmiliaClient(occurrences=_ONE_OCCURRENCE),
+    )
+
+    assert event_store.get("Activity", 7311901)["last_event_time"] == _EARLIER
+
+
+def test_activity_replayed_create_after_newer_update_is_skipped():
+    """Live 2026-11-13: a redelivered Create reverted a rename that had already synced."""
+    event_store = _FakeEventStore(
+        documents={("Activity", 7311901): {"name": "Renamed", "last_event_time": _LATER}}
+    )
+    calendar_client = _FakeCalendarClient()
+
+    result = handle_activity(
+        action="Create",
+        payload=_activity_payload(Name="Original"),
+        event_time=_EARLIER,
+        calendar_client=calendar_client,
+        event_store=event_store,
+        org_id=17659,
+        amilia_client=_FakeAmiliaClient(occurrences=_ONE_OCCURRENCE),
+    )
+
+    assert result["skipped"] == "stale event"
+    assert calendar_client.calls == [] and calendar_client.update_calls == []
+    assert event_store.get("Activity", 7311901)["name"] == "Renamed"
+
+
+def test_activity_exact_duplicate_delivery_is_skipped():
+    event_store = _FakeEventStore(
+        documents={("Activity", 7311901): {"name": "Test Activity", "last_event_time": _LATER}}
+    )
+
+    result = handle_activity(
+        action="Update",
+        payload=_activity_payload(),
+        event_time=_LATER,
+        calendar_client=_FakeCalendarClient(),
+        event_store=event_store,
+        org_id=17659,
+        amilia_client=_FakeAmiliaClient(occurrences=_ONE_OCCURRENCE),
+    )
+
+    assert result["skipped"] == "stale event"
+
+
+def test_activity_newer_update_is_applied():
+    event_store = _FakeEventStore(
+        documents={("Activity", 7311901): {"name": "Original", "last_event_time": _EARLIER}}
+    )
+
+    result = handle_activity(
+        action="Update",
+        payload=_activity_payload(Name="Renamed"),
+        event_time=_LATER,
+        calendar_client=_FakeCalendarClient(),
+        event_store=event_store,
+        org_id=17659,
+        amilia_client=_FakeAmiliaClient(occurrences=_ONE_OCCURRENCE),
+    )
+
+    assert "skipped" not in result
+    doc = event_store.get("Activity", 7311901)
+    assert doc["name"] == "Renamed"
+    assert doc["last_event_time"] == _LATER
+
+
+@pytest.mark.parametrize("event_time", [None, "", "not-a-time"])
+def test_activity_without_usable_event_time_is_applied_and_keeps_stored_time(event_time):
+    """Fail open: no usable EventTime means no staleness check, not a dropped webhook."""
+    event_store = _FakeEventStore(
+        documents={("Activity", 7311901): {"name": "Original", "last_event_time": _LATER}}
+    )
+
+    result = handle_activity(
+        action="Update",
+        payload=_activity_payload(Name="Renamed"),
+        event_time=event_time,
+        calendar_client=_FakeCalendarClient(),
+        event_store=event_store,
+        org_id=17659,
+        amilia_client=_FakeAmiliaClient(occurrences=_ONE_OCCURRENCE),
+    )
+
+    assert "skipped" not in result
+    assert event_store.get("Activity", 7311901)["last_event_time"] == _LATER
+
+
+def test_activity_stored_without_event_time_is_applied():
+    """Documents written by the backfill (or before this change) carry no last_event_time."""
+    event_store = _FakeEventStore(documents={("Activity", 7311901): {"name": "Original"}})
+
+    result = handle_activity(
+        action="Update",
+        payload=_activity_payload(),
+        event_time=_EARLIER,
+        calendar_client=_FakeCalendarClient(),
+        event_store=event_store,
+        org_id=17659,
+        amilia_client=_FakeAmiliaClient(occurrences=_ONE_OCCURRENCE),
+    )
+
+    assert "skipped" not in result
+
+
+def test_activity_stale_delete_is_skipped():
+    event_store = _FakeEventStore(
+        documents={
+            ("Activity", 7311901): {
+                "program_id": 107638,
+                "occurrences": {"1": {"calendar_event_id": "evt_1"}},
+                "last_event_time": _LATER,
+            }
+        }
+    )
+    calendar_client = _FakeCalendarClient()
+
+    result = handle_activity(
+        action="Delete",
+        payload={"Id": 7311901},
+        event_time=_EARLIER,
+        calendar_client=calendar_client,
+        event_store=event_store,
+        org_id=17659,
+        amilia_client=_FakeAmiliaClient(),
+    )
+
+    assert result["skipped"] == "stale event"
+    assert calendar_client.delete_calls == []
+    assert event_store.get("Activity", 7311901) is not None
+
+
+@pytest.mark.parametrize("action", ["Create", "Update", "Delete"])
+def test_program_stale_event_is_skipped(action):
+    event_store = _FakeEventStore(
+        documents={("Program", 107638): {"online": True, "last_event_time": _LATER}}
+    )
+    task_queue = _FakeTaskQueue()
+
+    result = handle_program(
+        action=action,
+        payload=_program_payload(Online=False),
+        event_time=_EARLIER,
+        calendar_client=_FakeCalendarClient(),
+        event_store=event_store,
+        task_queue=task_queue,
+    )
+
+    assert result["skipped"] == "stale event"
+    assert event_store.get("Program", 107638) == {"online": True, "last_event_time": _LATER}
+    assert task_queue.enqueued == []
+
+
+def test_program_update_stores_last_event_time():
+    event_store = _FakeEventStore(
+        documents={("Program", 107638): {"online": True, "last_event_time": _EARLIER}}
+    )
+
+    handle_program(
+        action="Update",
+        payload=_program_payload(),
+        event_time=_LATER,
+        calendar_client=_FakeCalendarClient(),
+        event_store=event_store,
+        task_queue=_FakeTaskQueue(),
+    )
+
+    assert event_store.get("Program", 107638)["last_event_time"] == _LATER
+
+
+def test_facility_booking_redelivered_create_does_not_duplicate_event():
+    event_store = _FakeEventStore()
+    calendar_client = _FakeCalendarClient()
+
+    for _ in range(2):
+        handle_facility_booking(
+            action="Create",
+            payload=_booking_payload(Title="Laser"),
+            event_time=_EARLIER,
+            calendar_client=calendar_client,
+            event_store=event_store,
+        )
+
+    assert len(calendar_client.calls) == 1
+    assert event_store.get("FacilityBooking", "FB-1")["last_event_time"] == _EARLIER
+
+
+@pytest.mark.parametrize("action", ["Update", "Delete"])
+def test_facility_booking_stale_update_or_delete_is_skipped(action):
+    event_store = _FakeEventStore(
+        documents={
+            ("FacilityBooking", "FB-1"): {"calendar_event_id": "evt_1", "last_event_time": _LATER}
+        }
+    )
+    calendar_client = _FakeCalendarClient()
+    payload = _booking_payload() if action == "Update" else {"Id": "FB-1"}
+
+    result = handle_facility_booking(
+        action=action,
+        payload=payload,
+        event_time=_EARLIER,
+        calendar_client=calendar_client,
+        event_store=event_store,
+    )
+
+    assert result["skipped"] == "stale event"
+    assert calendar_client.update_calls == [] and calendar_client.delete_calls == []

@@ -154,6 +154,19 @@ def test_written_event_is_ok(caplog, monkeypatch):
     assert "calendar_event_id=evt_abc" in caplog.records[-1].getMessage()
 
 
+def test_event_time_is_passed_to_the_handler(monkeypatch):
+    received = {}
+
+    def handler(**kw):
+        received.update(kw)
+        return {"reservation_id": 7, "calendar_event_id": "evt_abc"}
+
+    body = {**booking(), "EventTime": "2026-11-13T12:35:01.4348239-05:00"}
+    call(json_body=body, handler=handler, monkeypatch=monkeypatch)
+
+    assert received["event_time"] == "2026-11-13T12:35:01.4348239-05:00"
+
+
 def test_handler_writing_nothing_is_skipped_not_ok(caplog, monkeypatch):
     """A no-op booking must not read as success."""
 
