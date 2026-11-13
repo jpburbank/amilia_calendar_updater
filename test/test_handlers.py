@@ -1,7 +1,10 @@
 """Tests for per-context webhook handlers."""
 
+import logging
+
 import pytest
 
+from amilia_client import AmiliaNotFound
 from handlers import handle_activity, handle_facility_booking, handle_program
 
 
@@ -57,11 +60,33 @@ class _FakeEventStore:
 
 
 class _FakeAmiliaClient:
-    def __init__(self, occurrences=None):
+    """
+    `activity`/`program` are Amilia's current copies (default: nothing
+    beyond what the webhook says). `error` is raised by every call, e.g.
+    AmiliaNotFound for a deleted record or RuntimeError for an outage.
+    """
+
+    def __init__(self, occurrences=None, activity=None, program=None, error=None):
         self.occurrences = occurrences if occurrences is not None else []
+        self.activity = activity
+        self.program = program
+        self.error = error
+        self.calls = []
+
+    def _answer(self, name, value):
+        self.calls.append(name)
+        if self.error:
+            raise self.error
+        return value
+
+    def get_activity(self, org_id, activity_id):
+        return self._answer("get_activity", self.activity or {})
+
+    def get_program(self, org_id, program_id):
+        return self._answer("get_program", self.program or {})
 
     def get_activity_occurrences(self, org_id, activity_id):
-        return self.occurrences
+        return self._answer("get_activity_occurrences", self.occurrences)
 
 
 class _FakeTaskQueue:
@@ -339,6 +364,7 @@ def test_program_create_stores_document():
         calendar_client=_FakeCalendarClient(),
         event_store=event_store,
         task_queue=_FakeTaskQueue(),
+        amilia_client=_FakeAmiliaClient(),
     )
 
     doc = event_store.get("Program", 107638)
@@ -356,6 +382,7 @@ def test_program_create_trims_name_whitespace():
         calendar_client=_FakeCalendarClient(),
         event_store=event_store,
         task_queue=_FakeTaskQueue(),
+        amilia_client=_FakeAmiliaClient(),
     )
 
     assert event_store.get("Program", 107638)["name"] == "Classes and Workshops"
@@ -372,6 +399,7 @@ def test_program_create_reconciles_activities_that_arrived_first():
         calendar_client=_FakeCalendarClient(),
         event_store=event_store,
         task_queue=task_queue,
+        amilia_client=_FakeAmiliaClient(),
     )
 
     assert task_queue.enqueued == ["7311901"]
@@ -390,6 +418,7 @@ def test_program_update_with_no_online_change_does_not_reconcile():
         calendar_client=_FakeCalendarClient(),
         event_store=event_store,
         task_queue=task_queue,
+        amilia_client=_FakeAmiliaClient(),
     )
 
     assert task_queue.enqueued == []
@@ -411,6 +440,7 @@ def test_program_update_online_flip_reconciles_every_child():
         calendar_client=_FakeCalendarClient(),
         event_store=event_store,
         task_queue=task_queue,
+        amilia_client=_FakeAmiliaClient(),
     )
 
     assert sorted(task_queue.enqueued) == ["111", "222"]
@@ -436,6 +466,7 @@ def test_program_delete_cascades_to_children():
         calendar_client=calendar_client,
         event_store=event_store,
         task_queue=_FakeTaskQueue(),
+        amilia_client=_FakeAmiliaClient(),
     )
 
     assert sorted(calendar_client.delete_calls) == ["evt_a", "evt_b"]
@@ -897,6 +928,7 @@ def test_program_stale_event_is_skipped(action):
         calendar_client=_FakeCalendarClient(),
         event_store=event_store,
         task_queue=task_queue,
+        amilia_client=_FakeAmiliaClient(),
     )
 
     assert result["skipped"] == "stale event"
@@ -916,6 +948,7 @@ def test_program_update_stores_last_event_time():
         calendar_client=_FakeCalendarClient(),
         event_store=event_store,
         task_queue=_FakeTaskQueue(),
+        amilia_client=_FakeAmiliaClient(),
     )
 
     assert event_store.get("Program", 107638)["last_event_time"] == _LATER
@@ -958,3 +991,152 @@ def test_facility_booking_stale_update_or_delete_is_skipped(action):
 
     assert result["skipped"] == "stale event"
     assert calendar_client.update_calls == [] and calendar_client.delete_calls == []
+
+
+# ---------------------------------------------------------------------------
+# Current state from Amilia (deleted / archived / hidden since the webhook)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("action", ["Create", "Update"])
+def test_activity_deleted_in_amilia_is_skipped(action):
+    """Live 2026-11-13: a deleted Activity is 404 on both the activity and its occurrences."""
+    calendar_client = _FakeCalendarClient()
+    event_store = _FakeEventStore()
+
+    result = handle_activity(
+        action=action,
+        payload=_activity_payload(),
+        calendar_client=calendar_client,
+        event_store=event_store,
+        org_id=17659,
+        amilia_client=_FakeAmiliaClient(error=AmiliaNotFound("activities/7311901")),
+    )
+
+    assert result == {"activity_id": 7311901, "skipped": "deleted in Amilia"}
+    assert calendar_client.calls == []
+    assert event_store.get("Activity", 7311901) is None
+
+
+def test_activity_uses_current_status_over_replayed_payload():
+    """An old "Normal" must not put an activity hidden (or archived) since back on the calendar."""
+    calendar_client = _FakeCalendarClient()
+    event_store = _FakeEventStore()
+
+    result = handle_activity(
+        action="Update",
+        payload=_activity_payload(Status="Normal"),
+        calendar_client=calendar_client,
+        event_store=event_store,
+        org_id=17659,
+        amilia_client=_FakeAmiliaClient(occurrences=_ONE_OCCURRENCE, activity={"Status": "Hidden"}),
+    )
+
+    assert result["visible"] is False
+    assert calendar_client.calls == []
+    assert event_store.get("Activity", 7311901)["status"] == "Hidden"
+
+
+def test_activity_current_status_can_make_it_visible():
+    calendar_client = _FakeCalendarClient()
+
+    result = handle_activity(
+        action="Update",
+        payload=_activity_payload(Status="Hidden"),
+        calendar_client=calendar_client,
+        event_store=_FakeEventStore(),
+        org_id=17659,
+        amilia_client=_FakeAmiliaClient(occurrences=_ONE_OCCURRENCE, activity={"Status": "Normal"}),
+    )
+
+    assert result["visible"] is True
+    assert len(calendar_client.calls) == 1
+
+
+def test_activity_lookup_failure_falls_back_to_payload_status(caplog):
+    """Fail open: an Amilia outage on the activity lookup must not lose the change."""
+
+    class _ActivityLookupDown(_FakeAmiliaClient):
+        def get_activity(self, org_id, activity_id):
+            raise RuntimeError("HTTP 503")
+
+    calendar_client = _FakeCalendarClient()
+
+    with caplog.at_level(logging.WARNING):
+        result = handle_activity(
+            action="Create",
+            payload=_activity_payload(Status="Normal"),
+            calendar_client=calendar_client,
+            event_store=_FakeEventStore(),
+            org_id=17659,
+            amilia_client=_ActivityLookupDown(occurrences=_ONE_OCCURRENCE),
+        )
+
+    assert result["visible"] is True
+    assert len(calendar_client.calls) == 1
+    assert "could not fetch current Activity 7311901" in caplog.text
+
+
+@pytest.mark.parametrize("action", ["Create", "Update"])
+@pytest.mark.parametrize(
+    "amilia_client, reason",
+    [
+        (lambda: _FakeAmiliaClient(error=AmiliaNotFound("programs/107638")), "deleted in Amilia"),
+        (lambda: _FakeAmiliaClient(program={"IsArchived": True}), "archived in Amilia"),
+    ],
+)
+def test_program_deleted_or_archived_in_amilia_is_skipped(action, amilia_client, reason):
+    """Live 2026-11-13: an archived Program is 200 with IsArchived true, not 404."""
+    event_store = _FakeEventStore()
+    task_queue = _FakeTaskQueue()
+
+    result = handle_program(
+        action=action,
+        payload=_program_payload(),
+        calendar_client=_FakeCalendarClient(),
+        event_store=event_store,
+        task_queue=task_queue,
+        org_id=17659,
+        amilia_client=amilia_client(),
+    )
+
+    assert result == {"program_id": 107638, "skipped": reason}
+    assert event_store.get("Program", 107638) is None
+    assert task_queue.enqueued == []
+
+
+@pytest.mark.parametrize("action", ["Create", "Update"])
+def test_program_lookup_failure_is_applied_anyway(action, caplog):
+    """Fail open: an Amilia outage must not lose a (rare) Program change."""
+    event_store = _FakeEventStore()
+
+    with caplog.at_level(logging.WARNING):
+        result = handle_program(
+            action=action,
+            payload=_program_payload(),
+            calendar_client=_FakeCalendarClient(),
+            event_store=event_store,
+            task_queue=_FakeTaskQueue(),
+            org_id=17659,
+            amilia_client=_FakeAmiliaClient(error=RuntimeError("HTTP 503")),
+        )
+
+    assert "skipped" not in result
+    assert event_store.get("Program", 107638)["online"] is True
+    assert "could not fetch current Program 107638" in caplog.text
+
+
+def test_program_live_and_not_archived_is_applied():
+    event_store = _FakeEventStore()
+
+    handle_program(
+        action="Update",
+        payload=_program_payload(),
+        calendar_client=_FakeCalendarClient(),
+        event_store=event_store,
+        task_queue=_FakeTaskQueue(),
+        org_id=17659,
+        amilia_client=_FakeAmiliaClient(program={"Id": 107638, "IsArchived": False}),
+    )
+
+    assert event_store.get("Program", 107638)["name"] == "Classes and Workshops"

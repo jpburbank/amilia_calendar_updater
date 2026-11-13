@@ -1,8 +1,12 @@
 """Tests for AmiliaClient, against a fake requests.Session-shaped object."""
 
-from amilia_client import AUTHENTICATE_URL, AmiliaClient
+import pytest
+
+from amilia_client import AUTHENTICATE_URL, AmiliaClient, AmiliaNotFound
 
 OCCURRENCES_URL = "https://app.amilia.com/api/v3/en/org/17659/activities/1/occurrences"
+ACTIVITY_URL = "https://app.amilia.com/api/v3/en/org/17659/activities/1"
+PROGRAM_URL = "https://app.amilia.com/api/v3/en/org/17659/programs/107638"
 
 
 class _FakeResponse:
@@ -111,3 +115,61 @@ def test_follows_pagination_until_total_count_reached():
     occ_calls = [c for c in session.calls if c["url"] == OCCURRENCES_URL]
     assert occ_calls[0]["params"]["page"] == 1
     assert occ_calls[1]["params"]["page"] == 2
+
+
+def test_get_activity_returns_current_activity():
+    session = _FakeSession(
+        {
+            AUTHENTICATE_URL: [_FakeResponse(200, {"Token": "tok1"})],
+            ACTIVITY_URL: [_FakeResponse(200, {"Id": 1, "Status": "Hidden"})],
+        }
+    )
+    client = AmiliaClient(username="u", password="p", session=session)
+
+    assert client.get_activity(17659, 1) == {"Id": 1, "Status": "Hidden"}
+
+
+def test_get_program_returns_current_program():
+    session = _FakeSession(
+        {
+            AUTHENTICATE_URL: [_FakeResponse(200, {"Token": "tok1"})],
+            PROGRAM_URL: [_FakeResponse(200, {"Id": 107638, "IsArchived": True})],
+        }
+    )
+    client = AmiliaClient(username="u", password="p", session=session)
+
+    assert client.get_program(17659, 107638)["IsArchived"] is True
+
+
+@pytest.mark.parametrize(
+    "url, call",
+    [
+        (ACTIVITY_URL, lambda c: c.get_activity(17659, 1)),
+        (PROGRAM_URL, lambda c: c.get_program(17659, 107638)),
+        (OCCURRENCES_URL, lambda c: c.get_activity_occurrences(17659, 1)),
+    ],
+)
+def test_404_raises_amilia_not_found(url, call):
+    session = _FakeSession(
+        {
+            AUTHENTICATE_URL: [_FakeResponse(200, {"Token": "tok1"})],
+            url: [_FakeResponse(404, {"Message": "Entity was not found"})],
+        }
+    )
+    client = AmiliaClient(username="u", password="p", session=session)
+
+    with pytest.raises(AmiliaNotFound):
+        call(client)
+
+
+def test_other_errors_still_raise_http_errors():
+    session = _FakeSession(
+        {
+            AUTHENTICATE_URL: [_FakeResponse(200, {"Token": "tok1"})],
+            ACTIVITY_URL: [_FakeResponse(503)],
+        }
+    )
+    client = AmiliaClient(username="u", password="p", session=session)
+
+    with pytest.raises(RuntimeError, match="HTTP 503"):
+        client.get_activity(17659, 1)

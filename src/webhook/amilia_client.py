@@ -1,10 +1,13 @@
 """
-Thin wrapper around Amilia's v3 org REST API. Used for exactly one thing:
-fetching an Activity's real per-occurrence schedule (Start/End/Location per
-session), which Amilia's webhooks never include — only a human-readable
-ScheduleSummary string, not structured data. Everything else this app needs
-(Program's Online flag, Activity's Status/ProgramId/etc.) is already in the
-webhook payloads, so no other REST calls are made from the webhook handlers.
+Thin wrapper around Amilia's v3 org REST API. Used for:
+  - an Activity's real per-occurrence schedule (Start/End/Location per
+    session), which Amilia's webhooks never include — only a
+    human-readable ScheduleSummary string, not structured data;
+  - an Activity's or Program's *current* state, so a replayed old webhook
+    can't resurrect something since hidden, archived, or deleted.
+    Verified live 2026-11-13: a deleted Activity is 404; an archived
+    Activity is 200 with Status "Hidden" (no archived flag); an archived
+    Program is 200 with IsArchived true.
 
 Auth model: a dedicated Amilia user account, not the runtime service
 account (Amilia has no concept of a GCP identity). Amilia issues a JWT
@@ -30,6 +33,11 @@ from __future__ import annotations
 
 import requests
 
+
+class AmiliaNotFound(Exception):
+    """Amilia answered 404: the record no longer exists (deleted)."""
+
+
 AUTHENTICATE_URL = "https://www.amilia.com/api/V3/authenticate"
 API_BASE_URL = "https://app.amilia.com/api/v3/en"
 
@@ -40,6 +48,14 @@ class AmiliaClient:
         self._password = password
         self._session = session or requests.Session()
         self._token: str | None = None
+
+    def get_activity(self, org_id, activity_id) -> dict:
+        """The Activity as Amilia has it now. Raises AmiliaNotFound if deleted."""
+        return self._get(f"{API_BASE_URL}/org/{org_id}/activities/{activity_id}").json()
+
+    def get_program(self, org_id, program_id) -> dict:
+        """The Program as Amilia has it now. Raises AmiliaNotFound if deleted."""
+        return self._get(f"{API_BASE_URL}/org/{org_id}/programs/{program_id}").json()
 
     def get_activity_occurrences(self, org_id, activity_id) -> list[dict]:
         """Returns every occurrence (Id, Start, End, Location, ...) for an activity."""
@@ -62,6 +78,8 @@ class AmiliaClient:
         if response.status_code == 401:
             self._token = None
             response = self._session.get(url, headers=self._auth_header(), **kwargs)
+        if response.status_code == 404:
+            raise AmiliaNotFound(url)
         response.raise_for_status()
         return response
 

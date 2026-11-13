@@ -12,6 +12,15 @@ redelivered six minutes later, after an Update, and reverted the rename).
 Every stored document records the EventTime of the webhook that last wrote
 it (last_event_time), and a webhook whose EventTime is not newer than that
 is skipped, which also drops exact duplicate deliveries.
+
+Current state: EventTime only orders webhooks against a stored document.
+Once a record is deleted (or was never stored), a replayed old webhook has
+nothing to compare against, so Activity and Program Create/Update also ask
+Amilia for the record's current state. A 404 (deleted) or an archived
+Program is skipped, and an Activity's visibility uses its current Status,
+so an old "Normal" can't put a hidden or archived activity back on the
+calendar. If that lookup fails for any other reason, the handler falls back
+to the webhook payload (fail open): an Amilia outage must not lose changes.
 """
 
 from __future__ import annotations
@@ -19,7 +28,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from amilia_client import AmiliaClient
+from amilia_client import AmiliaClient, AmiliaNotFound
 from reconcile_queue import ReconcileQueue
 from shared.calendar_client import CalendarClient
 from shared.event_store import EventStore
@@ -54,6 +63,25 @@ def _stale_skip(existing: dict | None, event_time: str | None, **ids) -> dict | 
         "event_time": event_time,
         "last_event_time": existing["last_event_time"],
     }
+
+
+def _fetch_current(fetch, description: str) -> dict | None:
+    """
+    Amilia's current copy of a record, or None if it couldn't be fetched
+    (fail open: the caller falls back to the webhook payload).
+    AmiliaNotFound is not swallowed, because a 404 is a real answer.
+    """
+    try:
+        return fetch()
+    except AmiliaNotFound:
+        raise
+    except Exception:
+        logger.warning(
+            "could not fetch current %s from Amilia; using the webhook payload",
+            description,
+            exc_info=True,
+        )
+        return None
 
 
 def _last_event_time(existing: dict | None, event_time: str | None) -> str | None:
@@ -169,6 +197,8 @@ def handle_program(
     calendar_client: CalendarClient,
     event_store: EventStore,
     task_queue: ReconcileQueue,
+    org_id=None,
+    amilia_client: AmiliaClient | None = None,
     event_time: str | None = None,
     **_ignored,
 ) -> dict:
@@ -179,6 +209,9 @@ def handle_program(
         stale = _stale_skip(previous, event_time, program_id=program_id)
         if stale:
             return stale
+        gone = _program_gone(amilia_client, org_id, program_id)
+        if gone:
+            return gone
         online = payload.get("Online", True)
         event_store.set(
             "Program",
@@ -201,6 +234,9 @@ def handle_program(
         stale = _stale_skip(previous, event_time, program_id=program_id)
         if stale:
             return stale
+        gone = _program_gone(amilia_client, org_id, program_id)
+        if gone:
+            return gone
         was_online = previous.get("online") if previous else None
         online = payload.get("Online", True)
         event_store.set(
@@ -238,6 +274,19 @@ def handle_program(
         return {"program_id": program_id, "deleted": True, "activities_removed": len(activity_ids)}
 
     return {"skipped": f"unhandled action {action}"}
+
+
+def _program_gone(amilia_client: AmiliaClient, org_id, program_id) -> dict | None:
+    """A "skipped" result if Amilia says the Program is deleted or archived, else None."""
+    try:
+        current = _fetch_current(
+            lambda: amilia_client.get_program(org_id, program_id), f"Program {program_id}"
+        )
+    except AmiliaNotFound:
+        return {"program_id": program_id, "skipped": "deleted in Amilia"}
+    if current and current.get("IsArchived"):
+        return {"program_id": program_id, "skipped": "archived in Amilia"}
+    return None
 
 
 def _enqueue_reconciliation(
@@ -311,17 +360,23 @@ def handle_activity(
         if stale:
             return stale
         program_id = payload.get("ProgramId") or None  # Amilia uses 0 for "no program"
-        status = payload.get("Status")
+
+        # Per-occurrence Start/End/Location isn't in the webhook payload at
+        # all (only a human-readable ScheduleSummary), so it always comes
+        # from the REST API. The Activity itself is fetched too, for its
+        # current Status (see the module docstring).
+        try:
+            current = _fetch_current(
+                lambda: amilia_client.get_activity(org_id, activity_id), f"Activity {activity_id}"
+            )
+            occurrences = amilia_client.get_activity_occurrences(org_id, activity_id)
+        except AmiliaNotFound:
+            return {"activity_id": activity_id, "skipped": "deleted in Amilia"}
+        status = (current or payload).get("Status")
 
         program = event_store.get("Program", program_id) if program_id else None
         program_online = True if program is None else program.get("online", True)
         visible = program_online and status == "Normal"
-
-        # Per-occurrence Start/End/Location isn't in the webhook payload at
-        # all (only a human-readable ScheduleSummary) — this is the one
-        # piece of information genuinely missing from the webhook, so it's
-        # the only REST call this handler makes, once per Create/Update.
-        occurrences = amilia_client.get_activity_occurrences(org_id, activity_id)
 
         existing_occurrences = (existing or {}).get("occurrences") or {}
 

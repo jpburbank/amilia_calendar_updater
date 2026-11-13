@@ -34,8 +34,21 @@ reverted a rename that had already synced). Each event-store document records th
 the webhook that last wrote it (`last_event_time`); a webhook whose `EventTime` isn't newer is
 answered `status=skipped reason=stale event` (HTTP 200) and changes nothing. A webhook with no
 usable `EventTime`, or a document without `last_event_time` (e.g. written by the backfill), is
-processed normally. Known gap: after a Delete removes a document, a replayed older Create for the
-same ID has nothing to compare against and is applied.
+processed normally.
+
+**Deleted, archived, and hidden records are checked against Amilia.** `EventTime` can only order a
+webhook against a stored document, so Activity and Program Create/Update also ask Amilia's REST API
+for the record's current state:
+
+| Amilia says | Result |
+|---|---|
+| Activity or Program is 404 (deleted) | `status=skipped reason=deleted in Amilia`, nothing changes |
+| Program is `IsArchived: true` (archived Programs are 200, not 404) | `status=skipped reason=archived in Amilia` |
+| Activity's current `Status` (archived Activities are 200 with `Status: "Hidden"`) | Used for visibility instead of the webhook's `Status` |
+| Lookup fails any other way (timeout, 5xx) | Warning logged; the webhook payload is used (fail open), so an Amilia outage doesn't lose changes |
+
+That's one extra REST call per Activity webhook and per (rare) Program webhook. FacilityBooking
+(off by default) has no such check.
 
 ## Deployment
 
@@ -137,7 +150,7 @@ To run a script against the configured calendar, read the ID from the secret:
 
 ### Amilia REST API credentials (Program/Activity sync)
 `src/webhook/amilia_client.py` fetches per-occurrence schedule data (Start/End/Location) that Amilia's
-webhooks don't carry, using a dedicated Amilia user account rather than the runtime service
+webhooks don't carry, plus each Activity's and Program's current state (see "What gets synced"), using a dedicated Amilia user account rather than the runtime service
 account (Amilia has no concept of a GCP identity). Terraform creates the
 `amilia-api-username` / `amilia-api-password` secret *containers* only — it cannot set real
 Amilia credentials as values. After creating that dedicated user in Amilia, set the values by
