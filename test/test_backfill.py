@@ -161,6 +161,16 @@ def test_backfill_program_writes_document_and_returns_online():
     assert event_store.get("Program", 107638)["name"] == "Classes"
 
 
+def test_backfill_program_trims_name_whitespace():
+    event_store = _FakeEventStore()
+
+    backfill_program(
+        event_store, {"Id": 107638, "Name": " Classes  ", "IsVisible": True}, dry_run=False
+    )
+
+    assert event_store.get("Program", 107638)["name"] == "Classes"
+
+
 def test_backfill_program_dry_run_writes_nothing():
     event_store = _FakeEventStore()
 
@@ -183,6 +193,20 @@ def test_backfill_activity_creates_event_when_visible():
     doc = event_store.get("Activity", 7311901)
     assert doc["occurrences"]["111"]["calendar_event_id"] == "evt_1"
     assert ("Program", 107638, "Activities", 7311901) in event_store.memberships
+
+
+def test_backfill_activity_trims_name_whitespace_for_calendar_and_store():
+    calendar_client = _FakeCalendarClient()
+    event_store = _FakeEventStore()
+    amilia = _FakeAmiliaRestClient(occurrences=_ONE_OCCURRENCE)
+    activity = {"Id": 7311901, "Name": "  Test  ", "ProgramId": 107638, "Status": "Normal"}
+
+    backfill_activity(
+        calendar_client, event_store, amilia, 17659, activity, program_online=True, dry_run=False
+    )
+
+    assert calendar_client.calls[0]["summary"] == "Test"
+    assert event_store.get("Activity", 7311901)["name"] == "Test"
 
 
 def test_backfill_activity_sets_amilia_type_extended_properties():
@@ -324,7 +348,16 @@ def test_backfill_facility_booking_creates_event_when_new():
     assert doc["action"] == "Create"
 
 
-@pytest.mark.parametrize("title", [None, ""])
+def test_backfill_facility_booking_trims_title_whitespace():
+    calendar_client = _FakeCalendarClient()
+    reservation = {**_RESERVATION, "Title": "  Laser "}
+
+    backfill_facility_booking(calendar_client, _FakeEventStore(), reservation, dry_run=False)
+
+    assert calendar_client.calls[0]["summary"] == "Laser booking"
+
+
+@pytest.mark.parametrize("title", [None, "", "   "])
 def test_backfill_facility_booking_uses_default_title_when_title_is_blank(title):
     """Amilia sends Title as null/empty, not missing, on untitled admin bookings."""
     calendar_client = _FakeCalendarClient()

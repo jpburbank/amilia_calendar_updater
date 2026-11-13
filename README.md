@@ -21,6 +21,13 @@ FacilityBooking calendar events and event-store documents in place: they are no 
 or deleted, so clear them manually if they shouldn't stay. The flag lives in
 `src/shared/feature_flags.py`.
 
+**Titles are trimmed.** Leading and trailing whitespace is stripped from every Program/Activity
+name and FacilityBooking title before it's stored or used as a calendar event title (Amilia keeps
+stray spaces exactly as typed, e.g. `"Bandsaw Bear Claws  "`). A blank title falls back to the
+default (`Activity`, `Facility Booking`). Titles are display-only; nothing looks a record up by
+name. Events created earlier keep their untrimmed title until their Activity is next updated or
+re-synced. See `src/shared/titles.py`.
+
 ## Deployment
 
 If changes have been made or for some other reason the Cloud Function needs to be redeployed, and have passed tests, do the following.
