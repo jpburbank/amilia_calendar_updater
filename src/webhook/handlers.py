@@ -235,7 +235,7 @@ def handle_activity(
         occurrences = amilia_client.get_activity_occurrences(org_id, activity_id)
         # TEMP DEBUG — remove before merging. Shows whether the REST API
         # already reflects a schedule change at the moment the webhook
-        # arrives. Filter with: jsonPayload.message:"AMILIA_OCCURRENCES"
+        # arrives. Filter with: textPayload:"AMILIA_OCCURRENCES"
         logger.info(
             "AMILIA_OCCURRENCES activity_id=%s action=%s count=%d occurrences=%s",
             activity_id,

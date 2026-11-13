@@ -267,7 +267,7 @@ def amilia_webhook(request: Request):
     # TEMP DEBUG — remove before merging. First thing after the auth check:
     # confirms the function was invoked (with a valid token) at all,
     # independent of method/body validity or anything downstream. Filter
-    # with: jsonPayload.message:"AMILIA_WEBHOOK_INVOKED"
+    # with: textPayload:"AMILIA_WEBHOOK_INVOKED"
     logger.info("AMILIA_WEBHOOK_INVOKED method=%s", request.method)
 
     if request.method != "POST":
@@ -275,7 +275,7 @@ def amilia_webhook(request: Request):
 
     # TEMP DEBUG — remove before merging. Logs the complete, raw request Amilia
     # sends so we can see the real payload shape in GCP Logs Explorer. Filter
-    # with: jsonPayload.message:"AMILIA_RAW_PAYLOAD"
+    # with: textPayload:"AMILIA_RAW_PAYLOAD"
     logger.info(
         "AMILIA_RAW_PAYLOAD headers=%s body=%s",
         dict(request.headers),

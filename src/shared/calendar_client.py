@@ -26,8 +26,13 @@ standing to grant itself access, so there is no API path that bootstraps it.
 
 from __future__ import annotations
 
+import json
+import logging
+
 import google.auth
 from googleapiclient.discovery import build
+
+logger = logging.getLogger(__name__)
 
 # Narrowest scope that covers create/patch/delete on a calendar shared with
 # us. Deliberately not the full "calendar" scope, which would also permit
@@ -79,7 +84,9 @@ class CalendarClient:
         if extended_properties:
             body["extendedProperties"] = {"private": extended_properties}
 
-        return self._service.events().insert(calendarId=self.calendar_id, body=body).execute()
+        event = self._service.events().insert(calendarId=self.calendar_id, body=body).execute()
+        _log_response("insert", None, event)
+        return event
 
     def update_event(self, event_id: str, **fields) -> dict:
         """
@@ -101,11 +108,30 @@ class CalendarClient:
         if "extended_properties" in fields:
             body["extendedProperties"] = {"private": fields["extended_properties"]}
 
-        return (
+        event = (
             self._service.events()
             .patch(calendarId=self.calendar_id, eventId=event_id, body=body)
             .execute()
         )
+        _log_response("patch", event_id, event)
+        return event
 
     def delete_event(self, event_id: str) -> None:
-        self._service.events().delete(calendarId=self.calendar_id, eventId=event_id).execute()
+        response = (
+            self._service.events().delete(calendarId=self.calendar_id, eventId=event_id).execute()
+        )
+        _log_response("delete", event_id, response)
+
+
+def _log_response(operation: str, event_id: str | None, response) -> None:
+    """
+    TEMP DEBUG — remove before merging. Logs every Google Calendar API
+    response verbatim (delete returns an empty body). Filter with:
+    textPayload:"GOOGLE_CALENDAR_RESPONSE"
+    """
+    logger.info(
+        "GOOGLE_CALENDAR_RESPONSE operation=%s event_id=%s response=%s",
+        operation,
+        event_id,
+        json.dumps(response),
+    )

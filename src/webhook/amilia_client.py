@@ -28,7 +28,17 @@ as AMILIA_WEBHOOK_TOKEN.
 
 from __future__ import annotations
 
+import logging
+import uuid
+
 import requests
+
+logger = logging.getLogger(__name__)
+
+# TEMP DEBUG — remove before merging. Cloud Logging rejects entries over
+# 256 KB, so a large response body is split across several entries
+# (part=i/n, same request_id) rather than risk losing it.
+_LOG_CHUNK_CHARS = 100_000
 
 AUTHENTICATE_URL = "https://www.amilia.com/api/V3/authenticate"
 API_BASE_URL = "https://app.amilia.com/api/v3/en"
@@ -59,9 +69,11 @@ class AmiliaClient:
 
     def _get(self, url: str, **kwargs) -> requests.Response:
         response = self._session.get(url, headers=self._auth_header(), **kwargs)
+        _log_response(url, kwargs.get("params"), response)
         if response.status_code == 401:
             self._token = None
             response = self._session.get(url, headers=self._auth_header(), **kwargs)
+            _log_response(url, kwargs.get("params"), response)
         response.raise_for_status()
         return response
 
@@ -70,6 +82,30 @@ class AmiliaClient:
 
     def _authenticate(self) -> str:
         response = self._session.get(AUTHENTICATE_URL, auth=(self._username, self._password))
+        # TEMP DEBUG — status only: the body is the bearer token.
+        logger.info("AMILIA_REST_AUTH status=%s", response.status_code)
         response.raise_for_status()
         self._token = response.json()["Token"]
         return self._token
+
+
+def _log_response(url: str, params, response) -> None:
+    """
+    TEMP DEBUG — remove before merging. Logs every Amilia REST response
+    verbatim (success or error, before raise_for_status can discard it).
+    Filter with: textPayload:"AMILIA_REST_RESPONSE"
+    """
+    body = response.text
+    chunks = [body[i : i + _LOG_CHUNK_CHARS] for i in range(0, len(body), _LOG_CHUNK_CHARS)] or [""]
+    request_id = uuid.uuid4().hex[:8]
+    for index, chunk in enumerate(chunks, start=1):
+        logger.info(
+            "AMILIA_REST_RESPONSE request_id=%s part=%d/%d url=%s params=%s status=%s body=%s",
+            request_id,
+            index,
+            len(chunks),
+            url,
+            params,
+            response.status_code,
+            chunk,
+        )

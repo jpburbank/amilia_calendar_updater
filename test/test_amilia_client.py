@@ -1,5 +1,10 @@
 """Tests for AmiliaClient, against a fake requests.Session-shaped object."""
 
+import json
+import logging
+
+import pytest
+
 from amilia_client import AUTHENTICATE_URL, AmiliaClient
 
 OCCURRENCES_URL = "https://app.amilia.com/api/v3/en/org/17659/activities/1/occurrences"
@@ -12,6 +17,10 @@ class _FakeResponse:
 
     def json(self):
         return self._json_data
+
+    @property
+    def text(self):
+        return json.dumps(self._json_data)
 
     def raise_for_status(self):
         if self.status_code >= 400:
@@ -111,3 +120,76 @@ def test_follows_pagination_until_total_count_reached():
     occ_calls = [c for c in session.calls if c["url"] == OCCURRENCES_URL]
     assert occ_calls[0]["params"]["page"] == 1
     assert occ_calls[1]["params"]["page"] == 2
+
+
+def _rest_response_lines(caplog):
+    return [r.getMessage() for r in caplog.records if "AMILIA_REST_RESPONSE" in r.getMessage()]
+
+
+def test_logs_every_rest_response_body_verbatim(caplog):
+    page = {
+        "Items": [{"Id": 1, "Start": "s", "Location": {"Name": "Shop"}}],
+        "Paging": {"TotalCount": 1},
+    }
+    session = _FakeSession(
+        {
+            AUTHENTICATE_URL: [_FakeResponse(200, {"Token": "tok1"})],
+            OCCURRENCES_URL: [_FakeResponse(200, page)],
+        }
+    )
+    client = AmiliaClient(username="u", password="p", session=session)
+
+    with caplog.at_level(logging.INFO):
+        client.get_activity_occurrences(17659, 1)
+
+    assert any(line.endswith(f"body={json.dumps(page)}") for line in _rest_response_lines(caplog))
+
+
+def test_logs_error_response_body_before_raising(caplog):
+    session = _FakeSession(
+        {
+            AUTHENTICATE_URL: [_FakeResponse(200, {"Token": "tok1"})],
+            OCCURRENCES_URL: [_FakeResponse(404, {"Message": "not found"})],
+        }
+    )
+    client = AmiliaClient(username="u", password="p", session=session)
+
+    with caplog.at_level(logging.INFO), pytest.raises(RuntimeError):
+        client.get_activity_occurrences(17659, 1)
+
+    assert any(
+        "status=404" in line and "not found" in line for line in _rest_response_lines(caplog)
+    )
+
+
+def test_never_logs_the_bearer_token(caplog):
+    session = _FakeSession(
+        {
+            AUTHENTICATE_URL: [_FakeResponse(200, {"Token": "secret-token"})],
+            OCCURRENCES_URL: [_occurrences_page([{"Id": 1}], 1)],
+        }
+    )
+    client = AmiliaClient(username="u", password="p", session=session)
+
+    with caplog.at_level(logging.INFO):
+        client.get_activity_occurrences(17659, 1)
+
+    assert "secret-token" not in caplog.text
+
+
+def test_splits_large_response_bodies_across_log_entries(caplog, monkeypatch):
+    monkeypatch.setattr("amilia_client._LOG_CHUNK_CHARS", 10)
+    page = {"Items": [{"Id": 1, "Name": "x" * 40}], "Paging": {"TotalCount": 1}}
+    session = _FakeSession(
+        {
+            AUTHENTICATE_URL: [_FakeResponse(200, {"Token": "tok1"})],
+            OCCURRENCES_URL: [_FakeResponse(200, page)],
+        }
+    )
+    client = AmiliaClient(username="u", password="p", session=session)
+
+    with caplog.at_level(logging.INFO):
+        client.get_activity_occurrences(17659, 1)
+
+    reassembled = "".join(line.split(" body=", 1)[1] for line in _rest_response_lines(caplog))
+    assert reassembled == json.dumps(page)
