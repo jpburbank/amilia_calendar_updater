@@ -19,8 +19,11 @@ nothing to compare against, so Activity and Program Create/Update also ask
 Amilia for the record's current state. A 404 (deleted) or an archived
 Program is skipped, and an Activity's visibility uses its current Status,
 so an old "Normal" can't put a hidden or archived activity back on the
-calendar. If that lookup fails for any other reason, the handler falls back
-to the webhook payload (fail open): an Amilia outage must not lose changes.
+calendar. If that lookup fails for any other reason, the handler either
+raises (fail_open=False: the background worker still has retries left, so
+it retries for fresh state) or falls back to the webhook payload
+(fail_open=True: the final attempt, or inline processing with no retries
+behind it), so an Amilia outage never loses a change.
 """
 
 from __future__ import annotations
@@ -65,17 +68,20 @@ def _stale_skip(existing: dict | None, event_time: str | None, **ids) -> dict | 
     }
 
 
-def _fetch_current(fetch, description: str) -> dict | None:
+def _fetch_current(fetch, description: str, fail_open: bool) -> dict | None:
     """
-    Amilia's current copy of a record, or None if it couldn't be fetched
-    (fail open: the caller falls back to the webhook payload).
-    AmiliaNotFound is not swallowed, because a 404 is a real answer.
+    Amilia's current copy of a record. If it can't be fetched: with
+    fail_open, None (the caller falls back to the webhook payload);
+    without, the error propagates so the task is retried.
+    AmiliaNotFound always propagates, because a 404 is a real answer.
     """
     try:
         return fetch()
     except AmiliaNotFound:
         raise
     except Exception:
+        if not fail_open:
+            raise
         logger.warning(
             "could not fetch current %s from Amilia; using the webhook payload",
             description,
@@ -201,6 +207,7 @@ def handle_program(
     org_id=None,
     amilia_client: AmiliaClient | None = None,
     event_time: str | None = None,
+    fail_open: bool = True,
     **_ignored,
 ) -> dict:
     program_id = payload.get("Id")
@@ -210,7 +217,7 @@ def handle_program(
         stale = _stale_skip(previous, event_time, program_id=program_id)
         if stale:
             return stale
-        gone = _program_gone(amilia_client, org_id, program_id)
+        gone = _program_gone(amilia_client, org_id, program_id, fail_open)
         if gone:
             return gone
         online = payload.get("Online", True)
@@ -235,7 +242,7 @@ def handle_program(
         stale = _stale_skip(previous, event_time, program_id=program_id)
         if stale:
             return stale
-        gone = _program_gone(amilia_client, org_id, program_id)
+        gone = _program_gone(amilia_client, org_id, program_id, fail_open)
         if gone:
             return gone
         was_online = previous.get("online") if previous else None
@@ -277,11 +284,13 @@ def handle_program(
     return {"skipped": f"unhandled action {action}"}
 
 
-def _program_gone(amilia_client: AmiliaClient, org_id, program_id) -> dict | None:
+def _program_gone(amilia_client: AmiliaClient, org_id, program_id, fail_open: bool) -> dict | None:
     """A "skipped" result if Amilia says the Program is deleted or archived, else None."""
     try:
         current = _fetch_current(
-            lambda: amilia_client.get_program(org_id, program_id), f"Program {program_id}"
+            lambda: amilia_client.get_program(org_id, program_id),
+            f"Program {program_id}",
+            fail_open,
         )
     except AmiliaNotFound:
         return {"program_id": program_id, "skipped": "deleted in Amilia"}
@@ -351,6 +360,7 @@ def handle_activity(
     org_id,
     amilia_client: AmiliaClient,
     event_time: str | None = None,
+    fail_open: bool = True,
     **_ignored,
 ) -> dict:
     if action in ("Create", "Update"):
@@ -368,7 +378,9 @@ def handle_activity(
         # current Status (see the module docstring).
         try:
             current = _fetch_current(
-                lambda: amilia_client.get_activity(org_id, activity_id), f"Activity {activity_id}"
+                lambda: amilia_client.get_activity(org_id, activity_id),
+                f"Activity {activity_id}",
+                fail_open,
             )
             occurrences = amilia_client.get_activity_occurrences(org_id, activity_id)
         except AmiliaNotFound:

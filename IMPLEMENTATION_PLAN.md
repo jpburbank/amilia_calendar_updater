@@ -20,7 +20,7 @@ the webhook payload.
 when True (default, and the final attempt), the current fallback applies.
 **Tests**: Activity and Program lookup errors propagate with `fail_open=False` and fall back
 with `fail_open=True`.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 3: Enqueue in the webhook, process in a private worker
 **Goal**: The public webhook only checks the token and enqueues the webhook. A new entry point,
@@ -34,7 +34,7 @@ with `fail_open=True`.
   the error, then 200.
 **Tests**: queued / ignored / enqueue-failure fallback; worker ok, skipped, transient → 503,
 permanent → discarded, final attempt → fail_open plus discarded; transient classification.
-**Status**: Not Started
+**Status**: In Progress
 
 ## Stage 4: Docs and deploy
 **Goal**: README, env.yaml.example, and the deploy commands cover the worker, the new env vars,
