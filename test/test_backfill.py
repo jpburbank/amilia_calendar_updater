@@ -210,6 +210,40 @@ def test_backfill_activity_trims_name_whitespace_for_calendar_and_store():
     assert event_store.get("Activity", 7311901)["name"] == "Test"
 
 
+def test_backfill_activity_event_location_comes_from_the_occurrence():
+    calendar_client = _FakeCalendarClient()
+    event_store = _FakeEventStore()
+    occurrences = [{**_ONE_OCCURRENCE[0], "Location": {"Id": 1923752, "Name": "Wood shop"}}]
+    amilia = _FakeAmiliaRestClient(occurrences=occurrences)
+    activity = {"Id": 7311901, "Name": "Test", "ProgramId": 107638, "Status": "Normal"}
+
+    backfill_activity(
+        calendar_client, event_store, amilia, 17659, activity, program_online=True, dry_run=False
+    )
+
+    assert calendar_client.calls[0]["location"] == "Wood shop"
+    assert event_store.get("Activity", 7311901)["occurrences"]["111"]["location"] == "Wood shop"
+
+
+def test_backfill_activity_location_falls_back_to_schedules():
+    calendar_client = _FakeCalendarClient()
+    event_store = _FakeEventStore()
+    amilia = _FakeAmiliaRestClient(occurrences=_ONE_OCCURRENCE)
+    activity = {
+        "Id": 7311901,
+        "Name": "Test",
+        "ProgramId": 107638,
+        "Status": "Normal",
+        "Schedules": [{"Locations": [{"Name": "Metal shop"}]}],
+    }
+
+    backfill_activity(
+        calendar_client, event_store, amilia, 17659, activity, program_online=True, dry_run=False
+    )
+
+    assert calendar_client.calls[0]["location"] == "Metal shop"
+
+
 def test_backfill_activity_sets_amilia_type_extended_properties():
     calendar_client = _FakeCalendarClient()
     event_store = _FakeEventStore()

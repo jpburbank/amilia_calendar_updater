@@ -35,6 +35,7 @@ from amilia_client import AmiliaClient, AmiliaNotFound
 from reconcile_queue import ReconcileQueue
 from shared.calendar_client import CalendarClient, stable_event_id
 from shared.event_store import EventStore
+from shared.locations import occurrence_location, schedule_location
 from shared.titles import clean_title
 
 logger = logging.getLogger(__name__)
@@ -375,7 +376,8 @@ def handle_activity(
         # Per-occurrence Start/End/Location isn't in the webhook payload at
         # all (only a human-readable ScheduleSummary), so it always comes
         # from the REST API. The Activity itself is fetched too, for its
-        # current Status (see the module docstring).
+        # current Status (see the module docstring) and its Schedules'
+        # Locations, the fallback when an occurrence has none of its own.
         try:
             current = _fetch_current(
                 lambda: amilia_client.get_activity(org_id, activity_id),
@@ -393,7 +395,7 @@ def handle_activity(
 
         existing_occurrences = (existing or {}).get("occurrences") or {}
 
-        location = payload.get("LocationLabel") or None
+        location = schedule_location(current)
         summary = clean_title(payload.get("Name"), "Activity")
         description = _build_activity_description(payload)
         extended_properties = {"amilia_type": "Activity", "amilia_type_id": str(activity_id)}
@@ -405,6 +407,7 @@ def handle_activity(
             fresh_ids.add(occurrence_id)
             previous = existing_occurrences.get(occurrence_id) or {}
             calendar_event_id = previous.get("calendar_event_id")
+            occurrence_loc = occurrence_location(occurrence, current)
 
             if visible:
                 if calendar_event_id:
@@ -413,7 +416,7 @@ def handle_activity(
                         summary=summary,
                         start_iso=occurrence["Start"],
                         end_iso=occurrence["End"],
-                        location=location,
+                        location=occurrence_loc,
                         description=description,
                         extended_properties=extended_properties,
                     )
@@ -423,7 +426,7 @@ def handle_activity(
                         summary=summary,
                         start_iso=occurrence["Start"],
                         end_iso=occurrence["End"],
-                        location=location,
+                        location=occurrence_loc,
                         description=description,
                         extended_properties=extended_properties,
                     )
@@ -439,6 +442,7 @@ def handle_activity(
             occurrence_map[occurrence_id] = {
                 "start": occurrence["Start"],
                 "end": occurrence["End"],
+                "location": occurrence_loc,
                 "calendar_event_id": calendar_event_id,
             }
 

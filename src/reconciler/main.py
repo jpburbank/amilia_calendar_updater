@@ -113,7 +113,9 @@ def reconcile_activity(request: Request):
                 summary=clean_title(activity.get("name"), "Activity"),
                 start_iso=occurrence["start"],
                 end_iso=occurrence["end"],
-                location=activity.get("location"),
+                # Records written before per-occurrence locations fall back to
+                # the Activity-level one.
+                location=occurrence.get("location") or activity.get("location"),
             )
             occurrence["calendar_event_id"] = event["id"]
             changed = True

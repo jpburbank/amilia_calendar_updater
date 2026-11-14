@@ -28,6 +28,13 @@ default (`Activity`, `Facility Booking`). Titles are display-only; nothing looks
 name. Events created earlier keep their untrimmed title until their Activity is next updated or
 re-synced. See `src/shared/titles.py`.
 
+**Event locations come from each occurrence.** A location belongs to an occurrence, not an
+Activity, and the Activity webhook never carries one. Each Activity event's location is the
+occurrence's `Location.Name` (REST `activities/{id}/occurrences`), falling back to the distinct
+names in the Activity's `Schedules[].Locations[].Name` (REST `activities/{id}`). It's stored per
+occurrence, so the reconciler reuses it without another REST call. Events created earlier have
+no location until their Activity is next updated or re-synced. See `src/shared/locations.py`.
+
 **Redelivered and out-of-order webhooks are skipped.** Amilia delivers at least once and can
 replay an old webhook minutes later, after newer ones (seen live: a redelivered Activity Create
 reverted a rename that had already synced). Each event-store document records the `EventTime` of

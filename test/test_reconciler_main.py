@@ -104,6 +104,31 @@ def test_program_now_online_creates_missing_calendar_event(monkeypatch):
     )
 
 
+def test_occurrence_location_wins_over_activity_location(monkeypatch):
+    event_store = _FakeEventStore(
+        documents={
+            ("Activity", "111"): {
+                "status": "Normal",
+                "name": "Test Activity",
+                "location": "Metal shop",
+                "occurrences": {
+                    "a": {
+                        "start": "2026-09-25T12:46:00-07:00",
+                        "end": "2026-09-25T13:46:00-07:00",
+                        "location": "Wood shop",
+                        "calendar_event_id": None,
+                    }
+                },
+            },
+        }
+    )
+    calendar_client = _FakeCalendarClient()
+
+    _call("111", monkeypatch, calendar_client, event_store)
+
+    assert calendar_client.calls[0]["location"] == "Wood shop"
+
+
 def test_program_now_offline_deletes_existing_calendar_event(monkeypatch):
     event_store = _FakeEventStore(
         documents={
