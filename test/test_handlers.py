@@ -6,6 +6,7 @@ import pytest
 
 from amilia_client import AmiliaNotFound
 from handlers import handle_activity, handle_facility_booking, handle_program
+from shared.calendar_client import stable_event_id
 
 
 class _FakeCalendarClient:
@@ -1140,3 +1141,97 @@ def test_program_live_and_not_archived_is_applied():
     )
 
     assert event_store.get("Program", 107638)["name"] == "Classes and Workshops"
+
+
+# ---------------------------------------------------------------------------
+# Stable calendar event IDs (a retried task can't duplicate events)
+# ---------------------------------------------------------------------------
+
+
+def test_activity_creates_each_occurrence_under_a_stable_id():
+    calendar_client = _FakeCalendarClient()
+
+    handle_activity(
+        action="Create",
+        payload=_activity_payload(),
+        calendar_client=calendar_client,
+        event_store=_FakeEventStore(),
+        org_id=17659,
+        amilia_client=_FakeAmiliaClient(occurrences=_ONE_OCCURRENCE),
+    )
+
+    assert calendar_client.calls[0]["event_id"] == stable_event_id("Activity", 7311901, "141658523")
+
+
+def test_facility_booking_creates_under_a_stable_id():
+    calendar_client = _FakeCalendarClient()
+
+    handle_facility_booking(
+        action="Create",
+        payload=_booking_payload(),
+        calendar_client=calendar_client,
+        event_store=_FakeEventStore(),
+    )
+
+    assert calendar_client.calls[0]["event_id"] == stable_event_id("FacilityBooking", "FB-1")
+
+
+# ---------------------------------------------------------------------------
+# fail_open=False: the background worker still has retries left
+# ---------------------------------------------------------------------------
+
+
+def test_activity_lookup_failure_raises_when_not_failing_open():
+    """With retries left, retry for fresh state rather than trust the payload."""
+
+    class _ActivityLookupDown(_FakeAmiliaClient):
+        def get_activity(self, org_id, activity_id):
+            raise RuntimeError("HTTP 503")
+
+    calendar_client = _FakeCalendarClient()
+
+    with pytest.raises(RuntimeError, match="HTTP 503"):
+        handle_activity(
+            action="Create",
+            payload=_activity_payload(),
+            fail_open=False,
+            calendar_client=calendar_client,
+            event_store=_FakeEventStore(),
+            org_id=17659,
+            amilia_client=_ActivityLookupDown(occurrences=_ONE_OCCURRENCE),
+        )
+
+    assert calendar_client.calls == []
+
+
+@pytest.mark.parametrize("action", ["Create", "Update"])
+def test_program_lookup_failure_raises_when_not_failing_open(action):
+    event_store = _FakeEventStore()
+
+    with pytest.raises(RuntimeError, match="HTTP 503"):
+        handle_program(
+            action=action,
+            payload=_program_payload(),
+            fail_open=False,
+            calendar_client=_FakeCalendarClient(),
+            event_store=event_store,
+            task_queue=_FakeTaskQueue(),
+            org_id=17659,
+            amilia_client=_FakeAmiliaClient(error=RuntimeError("HTTP 503")),
+        )
+
+    assert event_store.get("Program", 107638) is None
+
+
+def test_not_found_is_still_a_skip_when_not_failing_open():
+    result = handle_activity(
+        action="Update",
+        payload=_activity_payload(),
+        fail_open=False,
+        calendar_client=_FakeCalendarClient(),
+        event_store=_FakeEventStore(),
+        org_id=17659,
+        amilia_client=_FakeAmiliaClient(error=AmiliaNotFound("activities/7311901")),
+    )
+
+    assert result["skipped"] == "deleted in Amilia"

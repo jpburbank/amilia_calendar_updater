@@ -196,3 +196,31 @@ def test_stored_name_is_trimmed_for_the_calendar(monkeypatch):
     _call("111", monkeypatch, calendar_client, event_store)
 
     assert calendar_client.calls[0]["summary"] == "Bandsaw Bear Claws"
+
+
+def test_reconciler_creates_events_under_stable_ids(monkeypatch):
+    """Cloud Tasks retries a failed reconcile; that must not duplicate events."""
+    from shared.calendar_client import stable_event_id
+
+    event_store = _FakeEventStore(
+        documents={
+            ("Program", 107638): {"online": True},
+            ("Activity", "111"): {
+                "program_id": 107638,
+                "status": "Normal",
+                "name": "Test Activity",
+                "occurrences": {
+                    "141658523": {
+                        "start": "2026-09-25T12:46:00-07:00",
+                        "end": "2026-09-25T13:46:00-07:00",
+                        "calendar_event_id": None,
+                    }
+                },
+            },
+        }
+    )
+    calendar_client = _FakeCalendarClient()
+
+    _call("111", monkeypatch, calendar_client, event_store)
+
+    assert calendar_client.calls[0]["event_id"] == stable_event_id("Activity", "111", "141658523")

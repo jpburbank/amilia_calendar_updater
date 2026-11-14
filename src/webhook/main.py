@@ -2,6 +2,20 @@
 Amilia -> Google Calendar webhook receiver
 Cloud Function (2nd gen), Python runtime, HTTP trigger.
 
+Two entry points, deployed from this same source as two functions:
+  - amilia_webhook (amilia-calendar-updater, public): checks the token,
+    then enqueues the raw webhook on the webhook-processing Cloud Tasks
+    queue (webhook_queue.py) and answers 200 "queued" in milliseconds. If
+    the enqueue itself fails, it processes the webhook inline instead, as
+    before background processing existed.
+  - process_webhook_task (amilia-webhook-worker, private, invoked only by
+    Cloud Tasks with an OIDC token): runs the handlers. A transient failure
+    answers 503 so Cloud Tasks retries (backoff 10s-10min). A permanent
+    failure, or any failure once WEBHOOK_TASK_GIVE_UP_AFTER_SECONDS have
+    passed since enqueue, logs one ERROR "status=discarded" entry holding
+    the full webhook and the error, then answers 200 so Cloud Tasks stops.
+    (Emailing that entry is issue #26.)
+
 Auth: a dedicated runtime service account, which the target calendar's owner
 has shared the calendar with. See shared/calendar_client.py for the setup
 steps and scripts/check_access.py to verify them.
@@ -70,6 +84,21 @@ Deploy:
     --env-vars-file=env.yaml \
     --set-secrets="GOOGLE_CALENDAR_ID=google-calendar-id:latest,AMILIA_WEBHOOK_TOKEN=amilia-webhook-token:latest,AMILIA_API_USERNAME=amilia-api-username:latest,AMILIA_API_PASSWORD=amilia-api-password:latest"
 
+  # The worker: same source, env and secrets, its own entry point, private.
+  gcloud functions deploy amilia-webhook-worker \
+    --gen2 \
+    --runtime=python312 \
+    --region=<REGION> \
+    --source=src/webhook \
+    --entry-point=process_webhook_task \
+    --trigger-http \
+    --no-allow-unauthenticated \
+    --service-account=<SA_EMAIL> \
+    --env-vars-file=env.yaml \
+    --set-secrets="GOOGLE_CALENDAR_ID=google-calendar-id:latest,AMILIA_WEBHOOK_TOKEN=amilia-webhook-token:latest,AMILIA_API_USERNAME=amilia-api-username:latest,AMILIA_API_PASSWORD=amilia-api-password:latest"
+
+  See README.md "Background webhook processing" for the first-rollout order.
+
 Amilia webhook contract (see /apidocs/ApiDocs/v1webhooks.html):
   POST body: { "OrganizationId", "Context", "Action", "Name", "EventTime", "Payload": {...} }
   Must respond 200 quickly or Amilia will retry for ~72h then disable the subscription.
@@ -82,6 +111,7 @@ import json
 import logging
 import os
 import sys
+from datetime import UTC, datetime
 
 import functions_framework
 from flask import Request, jsonify
@@ -89,9 +119,11 @@ from flask import Request, jsonify
 from amilia_client import AmiliaClient
 from handlers import handle_activity, handle_facility_booking, handle_program
 from reconcile_queue import ReconcileQueue
+from retry_policy import is_transient
 from shared.calendar_client import CalendarClient
 from shared.event_store import EventStore
 from shared.feature_flags import facility_booking_sync_enabled
+from webhook_queue import WebhookQueue
 
 
 class _StructuredFormatter(logging.Formatter):
@@ -136,6 +168,15 @@ RECONCILE_WORKER_URL = os.environ["RECONCILE_WORKER_URL"]
 # service account; Terraform's amilia_calendar_updater_email output).
 RECONCILE_QUEUE_LOCATION = os.environ["RECONCILE_QUEUE_LOCATION"]
 RECONCILE_INVOKER_SERVICE_ACCOUNT = os.environ["RECONCILE_INVOKER_SERVICE_ACCOUNT"]
+# Background webhook processing. The queue shares the reconcile queue's
+# region (RECONCILE_QUEUE_LOCATION) and invoker identity
+# (RECONCILE_INVOKER_SERVICE_ACCOUNT). WEBHOOK_TASK_GIVE_UP_AFTER_SECONDS
+# must stay below the queue's max_retry_duration (Terraform's
+# webhook_task_max_retry_duration, 25h) so the worker always makes its own
+# final attempt.
+WEBHOOK_QUEUE_ID = os.environ["WEBHOOK_QUEUE_ID"]
+WEBHOOK_WORKER_URL = os.environ["WEBHOOK_WORKER_URL"]
+WEBHOOK_TASK_GIVE_UP_AFTER_SECONDS = int(os.environ["WEBHOOK_TASK_GIVE_UP_AFTER_SECONDS"])
 
 
 def _build_handlers(facility_booking_enabled: bool) -> dict:
@@ -161,30 +202,39 @@ HANDLERS = _build_handlers(facility_booking_sync_enabled())
 # Every response carries one of these statuses, and each is logged at a level
 # reflecting what it cost:
 #
-#   ok       an event reached the calendar
-#   ignored  a context we deliberately don't sync (nothing was lost)
-#   rejected the request never looked like an Amilia webhook
-#   skipped  the handler ran but wrote nothing — a booking that is NOT on the
-#            calendar and never will be without someone noticing
-#   dropped  the handler raised — booking lost, no redelivery: we always ack
-#            with 200 so a bad booking or an outage never burns Amilia's ~72h
-#            retry budget or gets the whole subscription disabled
+#   ok        an event reached the calendar
+#   queued    the webhook was handed to the background worker
+#   ignored   a context we deliberately don't sync (nothing was lost)
+#   rejected  the request never looked like an Amilia webhook
+#   skipped   the handler ran but wrote nothing — a booking that is NOT on the
+#             calendar and never will be without someone noticing
+#   retrying  the worker hit a transient failure; Cloud Tasks will retry
+#   dropped   the handler raised while processing inline (only when
+#             enqueueing failed) — lost, no redelivery: we always ack with
+#             200 so a bad booking or an outage never burns Amilia's ~72h
+#             retry budget or gets the whole subscription disabled
+#   discarded the worker gave up (a permanent failure, or the retry window
+#             ran out); the log entry holds the full webhook
 #
-# Alert on `dropped`. Alert on the *rate* of `skipped` rather than on single
-# occurrences: a sustained stream means a handler path is unimplemented, but
-# individually it's expected.
+# Alert on `dropped` and `discarded` (email: issue #26). Alert on the *rate*
+# of `skipped` rather than on single occurrences: a sustained stream means a
+# handler path is unimplemented, but individually it's expected.
 _LOG_LEVELS = {
     "ok": logging.INFO,
+    "queued": logging.INFO,
     "ignored": logging.INFO,
     "rejected": logging.WARNING,
     "skipped": logging.WARNING,
+    "retrying": logging.WARNING,
     "dropped": logging.ERROR,
+    "discarded": logging.ERROR,
 }
 
 _calendar_client: CalendarClient | None = None
 _event_store: EventStore | None = None
 _amilia_client: AmiliaClient | None = None
 _task_queue: ReconcileQueue | None = None
+_webhook_queue: WebhookQueue | None = None
 
 
 def _get_calendar_client() -> CalendarClient:
@@ -231,6 +281,20 @@ def _get_task_queue() -> ReconcileQueue:
             invoker_service_account=RECONCILE_INVOKER_SERVICE_ACCOUNT,
         )
     return _task_queue
+
+
+def _get_webhook_queue() -> WebhookQueue:
+    """One client per instance, built lazily — see _get_calendar_client()."""
+    global _webhook_queue
+    if _webhook_queue is None:
+        _webhook_queue = WebhookQueue(
+            project_id=GCP_PROJECT_ID,
+            location=RECONCILE_QUEUE_LOCATION,
+            queue_id=WEBHOOK_QUEUE_ID,
+            worker_url=WEBHOOK_WORKER_URL,
+            invoker_service_account=RECONCILE_INVOKER_SERVICE_ACCOUNT,
+        )
+    return _webhook_queue
 
 
 def _respond(status: str, http_status: int, *, result=None, exc_info=False, **fields):
@@ -293,29 +357,133 @@ def amilia_webhook(request: Request):
 
     context = body.get("Context")
     action = body.get("Action")
-    payload = body.get("Payload", {})
     org_id = body.get("OrganizationId")
 
     logger.info("Received %s %s (OrganizationId=%s)", context, action, org_id)
 
-    handler = HANDLERS.get(context)
-    if handler is None:
+    if HANDLERS.get(context) is None:
         return _respond("ignored", 200, context=context, organization_id=org_id)
 
     try:
-        result = handler(
+        _get_webhook_queue().enqueue_webhook(body)
+    except Exception:
+        # Fail open: without the queue there are no retries, so process now,
+        # exactly as before background processing existed.
+        logger.warning("could not enqueue webhook; processing inline", exc_info=True)
+        return _process_inline(body)
+
+    return _respond("queued", 200, context=context, action=action, organization_id=org_id)
+
+
+@functions_framework.http
+def process_webhook_task(request: Request):
+    """
+    Cloud Tasks worker (amilia-webhook-worker). Private: Cloud Run only
+    admits Cloud Tasks' OIDC-signed calls, so there's no token check here.
+    """
+    task = request.get_json(silent=True) or {}
+    body = task.get("webhook")
+    attempt = request.headers.get("X-CloudTasks-TaskRetryCount")
+    if not isinstance(body, dict):
+        return _discard(task, None, attempt=attempt, reason="malformed task body")
+
+    context = body.get("Context")
+    action = body.get("Action")
+    org_id = body.get("OrganizationId")
+    final_attempt = _is_final_attempt(task.get("enqueued_at"))
+    logger.info(
+        "Processing %s %s (OrganizationId=%s attempt=%s final_attempt=%s)",
+        context,
+        action,
+        org_id,
+        attempt,
+        final_attempt,
+    )
+
+    if HANDLERS.get(context) is None:
+        # Routing changed between enqueue and now (e.g. a flag flipped).
+        return _respond("ignored", 200, context=context, organization_id=org_id)
+
+    try:
+        result = _run_handler(body, fail_open=final_attempt)
+    except Exception as exc:
+        if final_attempt:
+            return _discard(body, exc, attempt=attempt, reason="retry window exhausted")
+        if not is_transient(exc):
+            return _discard(body, exc, attempt=attempt, reason="permanent failure")
+        return _respond(
+            "retrying",
+            503,
+            exc_info=True,
+            context=context,
             action=action,
-            payload=payload,
-            event_time=body.get("EventTime"),
-            calendar_client=_get_calendar_client(),
-            event_store=_get_event_store(),
-            org_id=org_id,
-            amilia_client=_get_amilia_client(),
-            task_queue=_get_task_queue(),
+            organization_id=org_id,
+            attempt=attempt,
+            error=type(exc).__name__,
         )
+    return _result_response(context, action, org_id, result)
+
+
+def _is_final_attempt(enqueued_at: str | None, now: datetime | None = None) -> bool:
+    """
+    True once the retry window has run out. A missing or unreadable
+    enqueue time counts as final, so the task's data is logged rather than
+    risk Cloud Tasks' backstop silently dropping it later.
+    """
+    try:
+        started = datetime.fromisoformat(enqueued_at)
+    except (TypeError, ValueError):
+        return True
+    elapsed = ((now or datetime.now(UTC)) - started).total_seconds()
+    return elapsed >= WEBHOOK_TASK_GIVE_UP_AFTER_SECONDS
+
+
+def _run_handler(body: dict, *, fail_open: bool) -> dict:
+    return HANDLERS[body.get("Context")](
+        action=body.get("Action"),
+        payload=body.get("Payload", {}),
+        event_time=body.get("EventTime"),
+        fail_open=fail_open,
+        calendar_client=_get_calendar_client(),
+        event_store=_get_event_store(),
+        org_id=body.get("OrganizationId"),
+        amilia_client=_get_amilia_client(),
+        task_queue=_get_task_queue(),
+    )
+
+
+def _process_inline(body: dict):
+    context = body.get("Context")
+    action = body.get("Action")
+    org_id = body.get("OrganizationId")
+    try:
+        result = _run_handler(body, fail_open=True)
     except Exception as exc:
         return _failure_response(context, action, org_id, exc)
+    return _result_response(context, action, org_id, result)
 
+
+def _discard(data: dict, exc: Exception | None, *, attempt, reason: str):
+    """
+    Gives up on a task: one ERROR entry carrying everything needed to redo
+    it by hand (the full webhook as JSON, the error, the traceback), then
+    200 so Cloud Tasks stops retrying. Emailing it is issue #26.
+    """
+    return _respond(
+        "discarded",
+        200,
+        exc_info=exc is not None,
+        context=data.get("Context"),
+        action=data.get("Action"),
+        organization_id=data.get("OrganizationId"),
+        reason=reason,
+        attempt=attempt,
+        error=type(exc).__name__ if exc else None,
+        webhook=json.dumps(data),
+    )
+
+
+def _result_response(context: str, action: str, org_id, result: dict):
     if "skipped" in result:
         # The handler ran cleanly but nothing reached the calendar — e.g. an
         # Update/Delete for a booking with no stored event mapping. Must not
