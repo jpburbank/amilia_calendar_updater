@@ -90,6 +90,7 @@ import requests
 from shared.calendar_client import CalendarClient, stable_event_id
 from shared.event_store import EventStore
 from shared.feature_flags import facility_booking_sync_enabled
+from shared.locations import occurrence_location, schedule_location
 from shared.titles import clean_title
 
 AUTHENTICATE_URL = "https://www.amilia.com/api/V3/authenticate"
@@ -256,7 +257,7 @@ def backfill_activity(
     existing_occurrences = (existing or {}).get("occurrences") or {}
 
     occurrences = amilia.get_activity_occurrences(org_id, activity_id)
-    location = activity.get("LocationLabel") or None
+    location = schedule_location(activity)
     summary = clean_title(activity.get("Name"), "Activity")
     description = build_activity_description(activity)
     extended_properties = {"amilia_type": "Activity", "amilia_type_id": str(activity_id)}
@@ -267,6 +268,7 @@ def backfill_activity(
         occurrence_id = str(occurrence["Id"])
         previous = existing_occurrences.get(occurrence_id) or {}
         calendar_event_id = previous.get("calendar_event_id")
+        occurrence_loc = occurrence_location(occurrence, activity)
 
         if visible and not calendar_event_id:
             if not dry_run:
@@ -275,7 +277,7 @@ def backfill_activity(
                     summary=summary,
                     start_iso=occurrence["Start"],
                     end_iso=occurrence["End"],
-                    location=location,
+                    location=occurrence_loc,
                     description=description,
                     extended_properties=extended_properties,
                 )
@@ -285,6 +287,7 @@ def backfill_activity(
         occurrence_map[occurrence_id] = {
             "start": occurrence["Start"],
             "end": occurrence["End"],
+            "location": occurrence_loc,
             "calendar_event_id": calendar_event_id,
         }
 
