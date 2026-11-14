@@ -45,7 +45,7 @@ for the record's current state:
 | Activity or Program is 404 (deleted) | `status=skipped reason=deleted in Amilia`, nothing changes |
 | Program is `IsArchived: true` (archived Programs are 200, not 404) | `status=skipped reason=archived in Amilia` |
 | Activity's current `Status` (archived Activities are 200 with `Status: "Hidden"`) | Used for visibility instead of the webhook's `Status` |
-| Lookup fails any other way (timeout, 5xx) | Warning logged; the webhook payload is used (fail open), so an Amilia outage doesn't lose changes |
+| Lookup fails any other way (timeout, 5xx) | In the background worker: retried while the 24 h window lasts. On the final attempt, or when processing inline because enqueueing failed: warning logged and the webhook payload used (fail open), so an Amilia outage doesn't lose changes |
 
 That's one extra REST call per Activity webhook and per (rare) Program webhook. FacilityBooking
 (off by default) has no such check.
@@ -305,3 +305,54 @@ It shares the repo's one `env.yaml` (it only reads `GOOGLE_EVENT_STORE_BUCKET` f
 has its own, smaller `src/reconciler/requirements.txt` — it carries none of the webhook-only
 dependencies (Cloud Tasks client, `requests`). `--no-allow-unauthenticated` is deliberate: only
 Cloud Tasks, via a signed identity token, should ever be able to call it.
+
+The webhook worker is a third Cloud Function: the **same source** as the webhook, with its own
+entry point, and private (see "Background webhook processing" below):
+```
+./scripts/build.sh
+
+gcloud functions deploy amilia-webhook-worker --gen2 --runtime=python312 --region=$REGION \
+    --source=src/webhook --entry-point=process_webhook_task --trigger-http --no-allow-unauthenticated \
+    --service-account=$SA_EMAIL \
+    --env-vars-file=env.yaml \
+    --set-secrets="GOOGLE_CALENDAR_ID=google-calendar-id:latest,AMILIA_WEBHOOK_TOKEN=amilia-webhook-token:latest,AMILIA_API_USERNAME=amilia-api-username:latest,AMILIA_API_PASSWORD=amilia-api-password:latest"
+```
+Any change under `src/webhook/` or `src/shared/` must be deployed to **both**
+`amilia-calendar-updater` and `amilia-webhook-worker`, since they share code.
+
+### Background webhook processing
+`amilia-calendar-updater` (public) only checks the token, enqueues the raw webhook on the
+`amilia-webhook-processing` Cloud Tasks queue, and answers `status=queued` (HTTP 200) in
+milliseconds. On 2026-11-13, replies that took 2.7–5.9 s were followed by Amilia redeliveries.
+`amilia-webhook-worker` (private, called only by Cloud Tasks) runs the handlers.
+
+| Worker outcome | HTTP | What happens next |
+|---|---|---|
+| `ok` / `skipped` / `ignored` | 200 | Done |
+| `retrying`: transient failure (network errors, timeouts, 408/429/5xx, Calendar rate limits; see `src/webhook/retry_policy.py`) | 503 | Cloud Tasks retries: backoff 10 s, doubling, capped at 10 min |
+| `discarded`: permanent failure (e.g. calendar not shared, bad credentials, malformed payload), or any failure once `WEBHOOK_TASK_GIVE_UP_AFTER_SECONDS` (24 h) have passed since enqueue | 200 | Gives up. **One ERROR log entry holds the full webhook JSON, the error, and the traceback**, so the change can be redone by hand |
+
+- **One task at a time.** The queue has `max_concurrent_dispatches = 1`, so two tasks for the
+  same record can never race. Volume is a few dozen webhooks a day.
+- **The worker gives up on its own.** With retries left, a failed Amilia current-state lookup is
+  retried rather than falling back to the webhook payload. Only the final attempt (≥ 24 h after
+  enqueue) falls back, so a long Amilia outage still applies the change.
+- **24 h vs. 25 h.** The queue's own 25 h `max_retry_duration` (Terraform
+  `webhook_task_max_retry_duration`) is only a backstop and must stay above
+  `WEBHOOK_TASK_GIVE_UP_AFTER_SECONDS`.
+- **Retries never duplicate calendar events.** Events are created under IDs derived from Amilia
+  IDs (`stable_event_id` in `src/shared/calendar_client.py`). A repeated create gets a 409 and
+  patches the existing event instead, restoring it if it had been deleted.
+- **If enqueueing fails**, the webhook processes inline as before (`status=ok`/`dropped`).
+
+Find discarded tasks with `jsonPayload.message:"status=discarded"` (or `textPayload:` if entries
+land as text). Emailing them is [issue #26](https://github.com/jpburbank/amilia_calendar_updater/issues/26).
+
+**First rollout order** (the worker's invoker grant needs the function to exist):
+1. In `amilia_calendar_updater_gcp_resources`:
+   `terraform apply -target=google_cloud_tasks_queue.webhook_processing -target=google_cloud_tasks_queue_iam_member.amilia_calendar_updater_webhook_enqueuer`
+2. Add `WEBHOOK_QUEUE_ID`, `WEBHOOK_WORKER_URL`, and `WEBHOOK_TASK_GIVE_UP_AFTER_SECONDS` to
+   `env.yaml` (see `env.yaml.example`).
+3. Deploy `amilia-webhook-worker`.
+4. Full `terraform apply` (creates the invoker grant).
+5. Deploy `amilia-calendar-updater`. It starts enqueueing from this point.
