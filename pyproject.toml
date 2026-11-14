@@ -22,4 +22,4 @@ select = ["E", "W", "F", "I", "B", "UP"]
 [tool.ruff.lint.isort]
 # First-party modules the functions import as top-level names (see
 # pythonpath above), so isort groups them with the project's own code.
-known-first-party = ["shared", "handlers", "amilia_client", "reconcile_queue", "backfill", "bulk_delete"]
+known-first-party = ["shared", "handlers", "amilia_client", "reconcile_queue", "webhook_queue", "retry_policy", "backfill", "bulk_delete"]

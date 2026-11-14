@@ -34,11 +34,11 @@ with `fail_open=True`.
   the error, then 200.
 **Tests**: queued / ignored / enqueue-failure fallback; worker ok, skipped, transient → 503,
 permanent → discarded, final attempt → fail_open plus discarded; transient classification.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 4: Docs and deploy
 **Goal**: README, env.yaml.example, and the deploy commands cover the worker, the new env vars,
 and the rollout order.
 **Success Criteria**: A fresh reader can deploy all three functions from the README.
 **Tests**: n/a (docs)
-**Status**: Not Started
+**Status**: In Progress
