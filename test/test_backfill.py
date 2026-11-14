@@ -15,6 +15,7 @@ from backfill import (
     is_within_lookback,
     program_is_online,
 )
+from shared.calendar_client import stable_event_id
 
 
 class _FakeCalendarClient:
@@ -333,6 +334,7 @@ def test_backfill_facility_booking_creates_event_when_new():
 
     assert calendar_client.calls == [
         {
+            "event_id": stable_event_id("FacilityBooking", "FB-16905874"),
             "summary": "Laser booking",
             "start_iso": "2026-09-08T11:45:00-07:00",
             "end_iso": "2026-09-08T12:00:00-07:00",
@@ -504,3 +506,22 @@ def test_backfill_facility_bookings_imports_reservations_when_enabled(monkeypatc
     assert failed == []
     assert amilia.calls == [(17659, "2026-01-01", "2026-12-31")]
     assert len(calendar.calls) == 1
+
+
+def test_backfill_activity_creates_events_under_stable_ids():
+    """A rerun that died midway can't duplicate events."""
+    calendar_client = _FakeCalendarClient()
+    amilia = _FakeAmiliaRestClient(occurrences=_ONE_OCCURRENCE)
+    activity = {"Id": 7311901, "Name": "Test", "ProgramId": 107638, "Status": "Normal"}
+
+    backfill_activity(
+        calendar_client,
+        _FakeEventStore(),
+        amilia,
+        17659,
+        activity,
+        program_online=True,
+        dry_run=False,
+    )
+
+    assert calendar_client.calls[0]["event_id"] == stable_event_id("Activity", 7311901, "111")

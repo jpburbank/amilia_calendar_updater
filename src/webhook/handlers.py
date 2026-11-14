@@ -30,7 +30,7 @@ from datetime import datetime
 
 from amilia_client import AmiliaClient, AmiliaNotFound
 from reconcile_queue import ReconcileQueue
-from shared.calendar_client import CalendarClient
+from shared.calendar_client import CalendarClient, stable_event_id
 from shared.event_store import EventStore
 from shared.titles import clean_title
 
@@ -117,6 +117,7 @@ def handle_facility_booking(
             return stale
         title = clean_title(payload.get("Title"), "Facility Booking")
         event = calendar_client.create_event(
+            event_id=stable_event_id("FacilityBooking", reservation_id),
             summary=f"{title} booking",
             start_iso=payload["Start"],
             end_iso=payload["End"],
@@ -406,6 +407,7 @@ def handle_activity(
                     )
                 else:
                     event = calendar_client.create_event(
+                        event_id=stable_event_id("Activity", activity_id, occurrence_id),
                         summary=summary,
                         start_iso=occurrence["Start"],
                         end_iso=occurrence["End"],

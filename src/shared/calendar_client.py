@@ -26,13 +26,29 @@ standing to grant itself access, so there is no API path that bootstraps it.
 
 from __future__ import annotations
 
+import base64
+
 import google.auth
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 # Narrowest scope that covers create/patch/delete on a calendar shared with
 # us. Deliberately not the full "calendar" scope, which would also permit
 # creating calendars and rewriting sharing rules.
 SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
+
+
+def stable_event_id(*parts) -> str:
+    """
+    A stable Google Calendar event ID derived from Amilia IDs, e.g.
+    stable_event_id("Activity", 7482865, 145842706). Creating an event
+    under a known ID makes a retried create safe: the second insert gets a
+    409 instead of a duplicate event (see create_event). Calendar requires
+    5-1024 characters from base32hex (0-9, a-v), which the lowercased,
+    unpadded base32hex encoding of the parts always satisfies.
+    """
+    raw = "/".join(str(part) for part in parts).encode()
+    return base64.b32hexencode(raw).decode().rstrip("=").lower()
 
 
 class CalendarClient:
@@ -57,10 +73,22 @@ class CalendarClient:
         location: str | None = None,
         description: str | None = None,
         extended_properties: dict | None = None,
+        event_id: str | None = None,
     ) -> dict:
         """
         Creates an event and returns the created event resource (contains
-        'id'). `extended_properties` (a flat string->string dict) is stored
+        'id').
+
+        With `event_id` (see stable_event_id), creating is idempotent: if
+        that ID already exists, live or deleted (Calendar keeps deleted
+        events as status "cancelled", so their IDs can't be reused), the
+        existing event is patched with these fields and status "confirmed"
+        instead. That restores a deleted event rather than failing, so an
+        activity hidden and later shown again reuses its event. Verified
+        live 2026-11-13: re-insert gives 409, and patching a cancelled
+        event to "confirmed" restores it.
+
+        `extended_properties` (a flat string->string dict) is stored
         as the event's extendedProperties.private — visible via the API to
         any caller with read access to the event, not restricted to this
         app; "private" here only means it doesn't propagate to other
@@ -78,8 +106,27 @@ class CalendarClient:
             body["description"] = description
         if extended_properties:
             body["extendedProperties"] = {"private": extended_properties}
+        if event_id is None:
+            return self._service.events().insert(calendarId=self.calendar_id, body=body).execute()
 
-        return self._service.events().insert(calendarId=self.calendar_id, body=body).execute()
+        try:
+            return (
+                self._service.events()
+                .insert(calendarId=self.calendar_id, body={**body, "id": event_id})
+                .execute()
+            )
+        except HttpError as exc:
+            if exc.resp.status != 409:
+                raise
+        return (
+            self._service.events()
+            .patch(
+                calendarId=self.calendar_id,
+                eventId=event_id,
+                body={**body, "status": "confirmed"},
+            )
+            .execute()
+        )
 
     def update_event(self, event_id: str, **fields) -> dict:
         """
