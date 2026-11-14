@@ -87,7 +87,7 @@ import google.auth
 import google.auth.transport.requests
 import requests
 
-from shared.calendar_client import CalendarClient
+from shared.calendar_client import CalendarClient, stable_event_id
 from shared.event_store import EventStore
 from shared.feature_flags import facility_booking_sync_enabled
 from shared.titles import clean_title
@@ -271,6 +271,7 @@ def backfill_activity(
         if visible and not calendar_event_id:
             if not dry_run:
                 event = calendar_client.create_event(
+                    event_id=stable_event_id("Activity", activity_id, occurrence_id),
                     summary=summary,
                     start_iso=occurrence["Start"],
                     end_iso=occurrence["End"],
@@ -349,6 +350,7 @@ def backfill_facility_booking(
         return
 
     event = calendar_client.create_event(
+        event_id=stable_event_id("FacilityBooking", reservation_id),
         summary=f"{title} booking",
         start_iso=reservation["Start"],
         end_iso=reservation["End"],
