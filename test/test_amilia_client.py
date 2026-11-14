@@ -5,9 +5,11 @@ import logging
 
 import pytest
 
-from amilia_client import AUTHENTICATE_URL, AmiliaClient
+from amilia_client import AUTHENTICATE_URL, AmiliaClient, AmiliaNotFound
 
 OCCURRENCES_URL = "https://app.amilia.com/api/v3/en/org/17659/activities/1/occurrences"
+ACTIVITY_URL = "https://app.amilia.com/api/v3/en/org/17659/activities/1"
+PROGRAM_URL = "https://app.amilia.com/api/v3/en/org/17659/programs/107638"
 
 
 class _FakeResponse:
@@ -122,6 +124,64 @@ def test_follows_pagination_until_total_count_reached():
     assert occ_calls[1]["params"]["page"] == 2
 
 
+def test_get_activity_returns_current_activity():
+    session = _FakeSession(
+        {
+            AUTHENTICATE_URL: [_FakeResponse(200, {"Token": "tok1"})],
+            ACTIVITY_URL: [_FakeResponse(200, {"Id": 1, "Status": "Hidden"})],
+        }
+    )
+    client = AmiliaClient(username="u", password="p", session=session)
+
+    assert client.get_activity(17659, 1) == {"Id": 1, "Status": "Hidden"}
+
+
+def test_get_program_returns_current_program():
+    session = _FakeSession(
+        {
+            AUTHENTICATE_URL: [_FakeResponse(200, {"Token": "tok1"})],
+            PROGRAM_URL: [_FakeResponse(200, {"Id": 107638, "IsArchived": True})],
+        }
+    )
+    client = AmiliaClient(username="u", password="p", session=session)
+
+    assert client.get_program(17659, 107638)["IsArchived"] is True
+
+
+@pytest.mark.parametrize(
+    "url, call",
+    [
+        (ACTIVITY_URL, lambda c: c.get_activity(17659, 1)),
+        (PROGRAM_URL, lambda c: c.get_program(17659, 107638)),
+        (OCCURRENCES_URL, lambda c: c.get_activity_occurrences(17659, 1)),
+    ],
+)
+def test_404_raises_amilia_not_found(url, call):
+    session = _FakeSession(
+        {
+            AUTHENTICATE_URL: [_FakeResponse(200, {"Token": "tok1"})],
+            url: [_FakeResponse(404, {"Message": "Entity was not found"})],
+        }
+    )
+    client = AmiliaClient(username="u", password="p", session=session)
+
+    with pytest.raises(AmiliaNotFound):
+        call(client)
+
+
+def test_other_errors_still_raise_http_errors():
+    session = _FakeSession(
+        {
+            AUTHENTICATE_URL: [_FakeResponse(200, {"Token": "tok1"})],
+            ACTIVITY_URL: [_FakeResponse(503)],
+        }
+    )
+    client = AmiliaClient(username="u", password="p", session=session)
+
+    with pytest.raises(RuntimeError, match="HTTP 503"):
+        client.get_activity(17659, 1)
+
+
 def _rest_response_lines(caplog):
     return [r.getMessage() for r in caplog.records if "AMILIA_REST_RESPONSE" in r.getMessage()]
 
@@ -149,7 +209,7 @@ def test_logs_error_response_body_before_raising(caplog):
     session = _FakeSession(
         {
             AUTHENTICATE_URL: [_FakeResponse(200, {"Token": "tok1"})],
-            OCCURRENCES_URL: [_FakeResponse(404, {"Message": "not found"})],
+            OCCURRENCES_URL: [_FakeResponse(503, {"Message": "unavailable"})],
         }
     )
     client = AmiliaClient(username="u", password="p", session=session)
@@ -158,7 +218,7 @@ def test_logs_error_response_body_before_raising(caplog):
         client.get_activity_occurrences(17659, 1)
 
     assert any(
-        "status=404" in line and "not found" in line for line in _rest_response_lines(caplog)
+        "status=503" in line and "unavailable" in line for line in _rest_response_lines(caplog)
     )
 
 
