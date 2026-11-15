@@ -388,6 +388,10 @@ def handle_activity(
         except AmiliaNotFound:
             return {"activity_id": activity_id, "skipped": "deleted in Amilia"}
         status = (current or payload).get("Status")
+        # The webhook's StartDate/EndDate carry the wrong UTC offset (seen
+        # live: Pacific times labelled -04:00, then -05:00), so the REST copy
+        # wins; the payload is only the fallback when that fetch failed open.
+        dates = current or payload
 
         program = event_store.get("Program", program_id) if program_id else None
         program_online = True if program is None else program.get("online", True)
@@ -471,13 +475,13 @@ def handle_activity(
                 "sub_category_id": payload.get("SubCategoryId") or None,
                 "sub_category_name": payload.get("SubCategoryName"),
                 "status": status,
-                "start_date": payload.get("StartDate"),
-                "end_date": payload.get("EndDate"),
+                "start_date": dates.get("StartDate"),
+                "end_date": dates.get("EndDate"),
                 "location": location,
                 "occurrences": occurrence_map,
                 "last_event_time": _last_event_time(existing, event_time),
             },
-            custom_time=payload.get("EndDate"),
+            custom_time=dates.get("EndDate"),
         )
         return {
             "activity_id": activity_id,
