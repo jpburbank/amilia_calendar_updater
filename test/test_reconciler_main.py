@@ -129,6 +129,34 @@ def test_occurrence_location_wins_over_activity_location(monkeypatch):
     assert calendar_client.calls[0]["location"] == "Wood shop"
 
 
+def test_created_event_carries_description_and_amilia_tags(monkeypatch):
+    """Same event fields the webhook writes, from the stored record alone."""
+    event_store = _FakeEventStore(
+        documents={
+            ("Activity", "111"): {
+                "status": "Normal",
+                "name": "Test Activity",
+                "description": "<p>About.</p>",
+                "occurrences": {
+                    "a": {
+                        "start": "2026-09-25T12:46:00-07:00",
+                        "end": "2026-09-25T13:46:00-07:00",
+                        "location": "Wood shop",
+                        "calendar_event_id": None,
+                    }
+                },
+            },
+        }
+    )
+    calendar_client = _FakeCalendarClient()
+
+    _call("111", monkeypatch, calendar_client, event_store)
+
+    call = calendar_client.calls[0]
+    assert call["description"] == "<p>About.</p>"
+    assert call["extended_properties"] == {"amilia_type": "Activity", "amilia_type_id": "111"}
+
+
 def test_program_now_offline_deletes_existing_calendar_event(monkeypatch):
     event_store = _FakeEventStore(
         documents={
