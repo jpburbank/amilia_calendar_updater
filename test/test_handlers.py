@@ -639,6 +639,26 @@ def test_activity_dates_come_from_rest_not_the_webhook(action):
     assert event_store.set_calls[-1][3] == current["EndDate"]
 
 
+def test_activity_name_and_description_come_from_rest_and_are_stored():
+    """The REST copy is current; a webhook can lag behind it."""
+    calendar_client = _FakeCalendarClient()
+    event_store = _FakeEventStore()
+    current = {"Status": "Normal", "Name": "Renamed", "Description": "<p>About.</p>"}
+
+    handle_activity(
+        action="Update",
+        payload=_activity_payload(Name="Old name"),
+        calendar_client=calendar_client,
+        event_store=event_store,
+        org_id=17659,
+        amilia_client=_FakeAmiliaClient(occurrences=_ONE_OCCURRENCE, activity=current),
+    )
+
+    assert calendar_client.calls[0]["summary"] == "Renamed"
+    doc = event_store.get("Activity", 7311901)
+    assert (doc["name"], doc["description"]) == ("Renamed", "<p>About.</p>")
+
+
 def test_activity_dates_fall_back_to_the_webhook_without_a_rest_copy():
     event_store = _FakeEventStore()
 

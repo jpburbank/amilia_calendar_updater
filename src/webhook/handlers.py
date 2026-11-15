@@ -32,10 +32,10 @@ import logging
 from datetime import datetime
 
 from reconcile_queue import ReconcileQueue
+from shared.activities import activity_event_fields, activity_record, stored_occurrence
 from shared.amilia_client import AmiliaClient, AmiliaNotFound
 from shared.calendar_client import CalendarClient, stable_event_id
 from shared.event_store import EventStore
-from shared.locations import occurrence_location, schedule_location
 from shared.titles import clean_title
 
 logger = logging.getLogger(__name__)
@@ -332,27 +332,6 @@ def _delete_activity_events(calendar_client: CalendarClient, activity: dict) -> 
 # ---------------------------------------------------------------------------
 
 
-def _build_activity_description(payload: dict) -> str | None:
-    """
-    Builds the calendar event description from Description/Note/Prerequisite,
-    each its own paragraph. Description has no header (Amilia already sends
-    it as its own HTML paragraph(s)); Note and Prerequisite each get an HTML
-    header matching that same style, and are omitted entirely when null or
-    empty rather than shown blank.
-    """
-    paragraphs = []
-    description = payload.get("Description")
-    if description:
-        paragraphs.append(description)
-    note = payload.get("Note")
-    if note:
-        paragraphs.append(f"<p><strong>Note</strong><br>{note}</p>")
-    prerequisite = payload.get("Prerequisite")
-    if prerequisite:
-        paragraphs.append(f"<p><strong>Prerequisite</strong><br>{prerequisite}</p>")
-    return "\n".join(paragraphs) if paragraphs else None
-
-
 def handle_activity(
     action: str,
     payload: dict,
@@ -371,8 +350,6 @@ def handle_activity(
         stale = _stale_skip(existing, event_time, activity_id=activity_id)
         if stale:
             return stale
-        program_id = payload.get("ProgramId") or None  # Amilia uses 0 for "no program"
-
         # Per-occurrence Start/End/Location isn't in the webhook payload at
         # all (only a human-readable ScheduleSummary), so it always comes
         # from the REST API. The Activity itself is fetched too, for its
@@ -387,11 +364,14 @@ def handle_activity(
             occurrences = amilia_client.get_activity_occurrences(org_id, activity_id)
         except AmiliaNotFound:
             return {"activity_id": activity_id, "skipped": "deleted in Amilia"}
-        status = (current or payload).get("Status")
-        # The webhook's StartDate/EndDate carry the wrong UTC offset (seen
-        # live: Pacific times labelled -04:00, then -05:00), so the REST copy
-        # wins; the payload is only the fallback when that fetch failed open.
-        dates = current or payload
+        # The REST copy wins for every field: the webhook's StartDate/EndDate
+        # carry the wrong UTC offset (seen live: Pacific times labelled
+        # -04:00, then -05:00) and it has no Schedules. The payload is only
+        # the fallback when that fetch failed open.
+        activity = current or payload
+        status = activity.get("Status")
+        record = activity_record(activity, status)
+        program_id = record["program_id"]
 
         program = event_store.get("Program", program_id) if program_id else None
         program_online = True if program is None else program.get("online", True)
@@ -399,61 +379,36 @@ def handle_activity(
 
         existing_occurrences = (existing or {}).get("occurrences") or {}
 
-        location = schedule_location(current)
-        summary = clean_title(payload.get("Name"), "Activity")
-        description = _build_activity_description(payload)
-        extended_properties = {"amilia_type": "Activity", "amilia_type_id": str(activity_id)}
-
         occurrence_map = {}
-        fresh_ids = set()
         for occurrence in occurrences:
             occurrence_id = str(occurrence["Id"])
-            fresh_ids.add(occurrence_id)
             previous = existing_occurrences.get(occurrence_id) or {}
             calendar_event_id = previous.get("calendar_event_id")
-            occurrence_loc = occurrence_location(occurrence, current)
+            # start/end/location are stored (not just calendar_event_id) so a
+            # later Program-triggered reconciliation can create/recreate this
+            # occurrence's event without another REST call — see
+            # src/reconciler/main.py.
+            stored = stored_occurrence(occurrence, activity)
+            fields = activity_event_fields(activity_id, record, stored)
 
             if visible:
                 if calendar_event_id:
-                    calendar_client.update_event(
-                        calendar_event_id,
-                        summary=summary,
-                        start_iso=occurrence["Start"],
-                        end_iso=occurrence["End"],
-                        location=occurrence_loc,
-                        description=description,
-                        extended_properties=extended_properties,
-                    )
+                    calendar_client.update_event(calendar_event_id, **fields)
                 else:
                     event = calendar_client.create_event(
-                        event_id=stable_event_id("Activity", activity_id, occurrence_id),
-                        summary=summary,
-                        start_iso=occurrence["Start"],
-                        end_iso=occurrence["End"],
-                        location=occurrence_loc,
-                        description=description,
-                        extended_properties=extended_properties,
+                        event_id=stable_event_id("Activity", activity_id, occurrence_id), **fields
                     )
                     calendar_event_id = event["id"]
             elif calendar_event_id:
                 calendar_client.delete_event(calendar_event_id)
                 calendar_event_id = None
 
-            # start/end are stored (not just calendar_event_id) so a later
-            # Program-triggered reconciliation can create/recreate this
-            # occurrence's event without another REST call — see
-            # src/reconciler/main.py.
-            occurrence_map[occurrence_id] = {
-                "start": occurrence["Start"],
-                "end": occurrence["End"],
-                "location": occurrence_loc,
-                "calendar_event_id": calendar_event_id,
-            }
+            occurrence_map[occurrence_id] = {**stored, "calendar_event_id": calendar_event_id}
 
         # Occurrences that used to exist but dropped out of the fresh list
         # (the schedule shrank) still need their calendar events removed.
         for occurrence_id, previous in existing_occurrences.items():
-            if occurrence_id not in fresh_ids:
+            if occurrence_id not in occurrence_map:
                 calendar_event_id = (previous or {}).get("calendar_event_id")
                 if calendar_event_id:
                     calendar_client.delete_event(calendar_event_id)
@@ -468,20 +423,11 @@ def handle_activity(
             "Activity",
             activity_id,
             {
-                "name": clean_title(payload.get("Name")),
-                "program_id": program_id,
-                "category_id": payload.get("CategoryId") or None,
-                "category_name": payload.get("CategoryName"),
-                "sub_category_id": payload.get("SubCategoryId") or None,
-                "sub_category_name": payload.get("SubCategoryName"),
-                "status": status,
-                "start_date": dates.get("StartDate"),
-                "end_date": dates.get("EndDate"),
-                "location": location,
+                **record,
                 "occurrences": occurrence_map,
                 "last_event_time": _last_event_time(existing, event_time),
             },
-            custom_time=dates.get("EndDate"),
+            custom_time=record["end_date"],
         )
         return {
             "activity_id": activity_id,
