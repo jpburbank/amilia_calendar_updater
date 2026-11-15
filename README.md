@@ -35,6 +35,12 @@ names in the Activity's `Schedules[].Locations[].Name` (REST `activities/{id}`).
 occurrence, so the reconciler reuses it without another REST call. Events created earlier have
 no location until their Activity is next updated or re-synced. See `src/shared/locations.py`.
 
+**Activity dates come from REST.** The Activity webhook's `StartDate`/`EndDate` carry the wrong
+UTC offset (Pacific times labelled `-04:00`, then `-05:00`), so the stored `start_date`/`end_date`,
+and the record's retention `custom_time`, use the REST Activity's values. The webhook's are only a
+fallback when that fetch fails. Calendar event times were never affected: they come from each REST
+occurrence.
+
 **Redelivered and out-of-order webhooks are skipped.** Amilia delivers at least once and can
 replay an old webhook minutes later, after newer ones (seen live: a redelivered Activity Create
 reverted a rename that had already synced). Each event-store document records the `EventTime` of

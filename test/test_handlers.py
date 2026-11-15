@@ -613,6 +613,47 @@ def test_activity_location_falls_back_to_the_activitys_schedules():
     assert event_store.get("Activity", 7311901)["location"] == "Metal shop"
 
 
+@pytest.mark.parametrize("action", ["Create", "Update"])
+def test_activity_dates_come_from_rest_not_the_webhook(action):
+    """Seen live: the webhook labels Pacific times -05:00; REST has -08:00."""
+    event_store = _FakeEventStore()
+    current = {
+        "Status": "Normal",
+        "StartDate": "2027-01-01T09:30:00-08:00",
+        "EndDate": "2027-01-01T12:30:00-08:00",
+    }
+
+    handle_activity(
+        action=action,
+        payload=_activity_payload(
+            StartDate="2027-01-01T09:30:00-05:00", EndDate="2027-01-01T12:30:00-05:00"
+        ),
+        calendar_client=_FakeCalendarClient(),
+        event_store=event_store,
+        org_id=17659,
+        amilia_client=_FakeAmiliaClient(occurrences=_ONE_OCCURRENCE, activity=current),
+    )
+
+    doc = event_store.get("Activity", 7311901)
+    assert (doc["start_date"], doc["end_date"]) == (current["StartDate"], current["EndDate"])
+    assert event_store.set_calls[-1][3] == current["EndDate"]
+
+
+def test_activity_dates_fall_back_to_the_webhook_without_a_rest_copy():
+    event_store = _FakeEventStore()
+
+    handle_activity(
+        action="Update",
+        payload=_activity_payload(),
+        calendar_client=_FakeCalendarClient(),
+        event_store=event_store,
+        org_id=17659,
+        amilia_client=_FakeAmiliaClient(occurrences=_ONE_OCCURRENCE),
+    )
+
+    assert event_store.get("Activity", 7311901)["end_date"] == "2026-10-27T13:29:00-04:00"
+
+
 def test_activity_create_with_offline_program_is_not_visible():
     event_store = _FakeEventStore(documents={("Program", 107638): {"online": False}})
     calendar_client = _FakeCalendarClient()
