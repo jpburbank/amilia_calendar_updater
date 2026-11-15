@@ -5,13 +5,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from backfill import (
-    AUTHENTICATE_URL,
-    _AmiliaRestClient,
     backfill_activity,
     backfill_facility_booking,
     backfill_facility_bookings,
     backfill_program,
-    build_activity_description,
     is_within_lookback,
     program_is_online,
 )
@@ -19,14 +16,25 @@ from shared.calendar_client import stable_event_id
 
 
 class _FakeCalendarClient:
-    def __init__(self):
+    def __init__(self, events=None):
         self.calls = []
+        self.update_calls = []
+        self.get_calls = []
+        self.events = dict(events or {})  # {event_id: event resource}, for get_event
         self._next_id = 0
 
     def create_event(self, **kwargs):
         self.calls.append(kwargs)
         self._next_id += 1
         return {"id": f"evt_{self._next_id}"}
+
+    def get_event(self, event_id):
+        self.get_calls.append(event_id)
+        return self.events.get(event_id)
+
+    def update_event(self, event_id, **fields):
+        self.update_calls.append((event_id, fields))
+        return {"id": event_id}
 
 
 class _FakeEventStore:
@@ -53,32 +61,6 @@ class _FakeAmiliaRestClient:
 
     def get_activity_occurrences(self, org_id, activity_id):
         return self.occurrences
-
-
-class _FakeAmiliaResponse:
-    def __init__(self, status_code=200, json_data=None):
-        self.status_code = status_code
-        self._json_data = json_data if json_data is not None else {}
-
-    def json(self):
-        return self._json_data
-
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise RuntimeError(f"HTTP {self.status_code}")
-
-
-class _FakeAmiliaSession:
-    """Every URL returns one empty, fully-paged response; records what params were sent."""
-
-    def __init__(self):
-        self.calls = []
-
-    def get(self, url, headers=None, auth=None, params=None):
-        self.calls.append({"url": url, "params": params})
-        if url == AUTHENTICATE_URL:
-            return _FakeAmiliaResponse(200, {"Token": "tok"})
-        return _FakeAmiliaResponse(200, {"Items": [], "Paging": {"TotalCount": 0, "Next": ""}})
 
 
 _ONE_OCCURRENCE = [
@@ -119,36 +101,6 @@ def test_within_lookback_keeps_activities_with_no_end_date():
     cutoff = datetime.now(UTC) - timedelta(days=30)
 
     assert is_within_lookback({}, cutoff) is True
-
-
-def test_build_activity_description_all_three_fields():
-    activity = {
-        "Description": "<p>About the class.</p>",
-        "Note": "Bring your own tools.",
-        "Prerequisite": "Ages 10+",
-    }
-
-    assert build_activity_description(activity) == (
-        "<p>About the class.</p>\n"
-        "<p><strong>Note</strong><br>Bring your own tools.</p>\n"
-        "<p><strong>Prerequisite</strong><br>Ages 10+</p>"
-    )
-
-
-def test_build_activity_description_omits_null_note_and_prerequisite():
-    activity = {"Description": "<p>About the class.</p>", "Note": None, "Prerequisite": None}
-
-    assert build_activity_description(activity) == "<p>About the class.</p>"
-
-
-def test_build_activity_description_omits_empty_string_note_and_prerequisite():
-    activity = {"Description": "<p>About the class.</p>", "Note": "", "Prerequisite": ""}
-
-    assert build_activity_description(activity) == "<p>About the class.</p>"
-
-
-def test_build_activity_description_none_when_nothing_present():
-    assert build_activity_description({}) is None
 
 
 def test_backfill_program_writes_document_and_returns_online():
@@ -454,47 +406,6 @@ def test_backfill_facility_booking_dry_run_writes_nothing():
     assert event_store.get("FacilityBooking", "FB-16905874") is None
 
 
-def test_get_programs_requests_the_default_page_size():
-    client = _AmiliaRestClient("u", "p", session=_FakeAmiliaSession())
-
-    client.get_programs(17659)
-
-    call = next(c for c in client._session.calls if c["url"].endswith("/org/17659/programs"))
-    assert call["params"]["perPage"] == 2000
-
-
-def test_get_program_activities_requests_the_reduced_page_size():
-    """Regression test: this endpoint's real max is 1000, not 2000 like the
-    others — a perPage=2000 request 400s against the live API ("must be a
-    whole number between 5 and 1000")."""
-    client = _AmiliaRestClient("u", "p", session=_FakeAmiliaSession())
-
-    client.get_program_activities(17659, 107638)
-
-    call = next(c for c in client._session.calls if "activities" in c["url"])
-    assert call["params"]["perPage"] == 1000
-
-
-def test_get_activity_occurrences_requests_the_default_page_size():
-    client = _AmiliaRestClient("u", "p", session=_FakeAmiliaSession())
-
-    client.get_activity_occurrences(17659, 7311901)
-
-    call = next(c for c in client._session.calls if "occurrences" in c["url"])
-    assert call["params"]["perPage"] == 2000
-
-
-def test_get_reservations_requests_the_default_page_size_and_date_range():
-    client = _AmiliaRestClient("u", "p", session=_FakeAmiliaSession())
-
-    client.get_reservations(17659, "2026-01-01", "2026-12-31")
-
-    call = next(c for c in client._session.calls if "reservations" in c["url"])
-    assert call["params"]["perPage"] == 2000
-    assert call["params"]["from"] == "2026-01-01"
-    assert call["params"]["to"] == "2026-12-31"
-
-
 class _FakeReservationsClient:
     def __init__(self, reservations):
         self.reservations = reservations
@@ -559,3 +470,121 @@ def test_backfill_activity_creates_events_under_stable_ids():
     )
 
     assert calendar_client.calls[0]["event_id"] == stable_event_id("Activity", 7311901, "111")
+
+
+# ---------------------------------------------------------------------------
+# --update-existing
+# ---------------------------------------------------------------------------
+
+_LOCATED_OCCURRENCE = [{**_ONE_OCCURRENCE[0], "Location": {"Name": "Wood shop"}}]
+_VISIBLE_ACTIVITY = {"Id": 7311901, "Name": "Test", "ProgramId": 107638, "Status": "Normal"}
+
+
+def _tracked_store(**record):
+    return _FakeEventStore(
+        documents={
+            ("Activity", 7311901): {
+                "occurrences": {"111": {"calendar_event_id": "evt_old"}},
+                **record,
+            }
+        }
+    )
+
+
+def _calendar_event(**overrides):
+    """evt_old as the calendar returns it: times in UTC, no location yet."""
+    event = {
+        "id": "evt_old",
+        "status": "confirmed",
+        "summary": "Test",
+        "start": {"dateTime": "2026-09-25T19:46:00Z", "timeZone": "UTC"},
+        "end": {"dateTime": "2026-09-25T20:46:00Z", "timeZone": "UTC"},
+        "extendedProperties": {"private": {"amilia_type": "Activity", "amilia_type_id": "7311901"}},
+    }
+    event.update(overrides)
+    return event
+
+
+def _backfill(calendar_client, event_store, *, update_existing, dry_run=False, **activity):
+    backfill_activity(
+        calendar_client,
+        event_store,
+        _FakeAmiliaRestClient(occurrences=_LOCATED_OCCURRENCE),
+        17659,
+        {**_VISIBLE_ACTIVITY, **activity},
+        program_online=True,
+        dry_run=dry_run,
+        update_existing=update_existing,
+    )
+
+
+def test_existing_events_are_left_alone_by_default():
+    calendar_client = _FakeCalendarClient(events={"evt_old": _calendar_event()})
+
+    _backfill(calendar_client, _tracked_store(), update_existing=False)
+
+    assert (calendar_client.get_calls, calendar_client.update_calls) == ([], [])
+
+
+def test_update_existing_patches_only_the_fields_that_differ():
+    calendar_client = _FakeCalendarClient(events={"evt_old": _calendar_event()})
+
+    _backfill(calendar_client, _tracked_store(), update_existing=True)
+
+    assert calendar_client.update_calls == [("evt_old", {"location": "Wood shop"})]
+
+
+def test_update_existing_leaves_matching_events_unpatched():
+    calendar_client = _FakeCalendarClient(events={"evt_old": _calendar_event(location="Wood shop")})
+
+    _backfill(calendar_client, _tracked_store(), update_existing=True)
+
+    assert calendar_client.update_calls == []
+
+
+def test_update_existing_dry_run_reads_and_prints_but_writes_nothing(capsys):
+    calendar_client = _FakeCalendarClient(events={"evt_old": _calendar_event()})
+    event_store = _tracked_store()
+
+    _backfill(calendar_client, event_store, update_existing=True, dry_run=True)
+
+    assert calendar_client.update_calls == []
+    assert event_store.set_calls == []
+    assert "event evt_old location: None -> 'Wood shop'" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("event", [None, _calendar_event(status="cancelled")])
+def test_update_existing_never_recreates_a_missing_or_cancelled_event(event):
+    calendar_client = _FakeCalendarClient(events={"evt_old": event} if event else {})
+
+    _backfill(calendar_client, _tracked_store(), update_existing=True)
+
+    assert (calendar_client.calls, calendar_client.update_calls) == ([], [])
+
+
+def test_update_existing_skips_hidden_activities():
+    calendar_client = _FakeCalendarClient(events={"evt_old": _calendar_event()})
+
+    _backfill(calendar_client, _tracked_store(), update_existing=True, Status="Hidden")
+
+    assert (calendar_client.get_calls, calendar_client.update_calls) == ([], [])
+
+
+def test_backfill_keeps_the_stored_last_event_time():
+    """Dropping it would make the next replayed old webhook look fresh."""
+    event_store = _tracked_store(last_event_time="2026-11-14T15:04:06-05:00")
+
+    _backfill(_FakeCalendarClient(), event_store, update_existing=False)
+
+    stored = event_store.get("Activity", 7311901)
+    assert stored["last_event_time"] == "2026-11-14T15:04:06-05:00"
+
+
+def test_backfill_stores_the_description_for_the_reconciler():
+    event_store = _FakeEventStore()
+
+    _backfill(
+        _FakeCalendarClient(), event_store, update_existing=False, Description="<p>About.</p>"
+    )
+
+    assert event_store.get("Activity", 7311901)["description"] == "<p>About.</p>"

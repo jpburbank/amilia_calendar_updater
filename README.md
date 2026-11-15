@@ -26,14 +26,15 @@ name and FacilityBooking title before it's stored or used as a calendar event ti
 stray spaces exactly as typed, e.g. `"Bandsaw Bear Claws  "`). A blank title falls back to the
 default (`Activity`, `Facility Booking`). Titles are display-only; nothing looks a record up by
 name. Events created earlier keep their untrimmed title until their Activity is next updated or
-re-synced. See `src/shared/titles.py`.
+the backfill runs with `--update-existing`. See `src/shared/titles.py`.
 
 **Event locations come from each occurrence.** A location belongs to an occurrence, not an
 Activity, and the Activity webhook never carries one. Each Activity event's location is the
 occurrence's `Location.Name` (REST `activities/{id}/occurrences`), falling back to the distinct
 names in the Activity's `Schedules[].Locations[].Name` (REST `activities/{id}`). It's stored per
 occurrence, so the reconciler reuses it without another REST call. Events created earlier have
-no location until their Activity is next updated or re-synced. See `src/shared/locations.py`.
+no location until their Activity is next updated or the backfill runs with `--update-existing`.
+See `src/shared/locations.py`.
 
 **Activity dates come from REST.** The Activity webhook's `StartDate`/`EndDate` carry the wrong
 UTC offset (Pacific times labelled `-04:00`, then `-05:00`), so the stored `start_date`/`end_date`,
@@ -41,13 +42,22 @@ and the record's retention `custom_time`, use the REST Activity's values. The we
 fallback when that fetch fails. Calendar event times were never affected: they come from each REST
 occurrence.
 
+**One definition of an Activity's record and events.** `src/shared/activities.py` builds the
+stored Activity record (name, Program, category, status, dates, description, location, and each
+occurrence's start/end/location) and the calendar event fields (title, times, location,
+description, Amilia tags). The webhook handler, the reconciler and the backfill all use it, so
+they write the same thing. The handler builds both from the REST Activity; the webhook payload is
+only the fallback when that fetch fails. Because the record holds the description, events the
+reconciler creates match the webhook's without calling Amilia; records stored before this have no
+description until their Activity is next updated or backfilled.
+
 **Redelivered and out-of-order webhooks are skipped.** Amilia delivers at least once and can
 replay an old webhook minutes later, after newer ones (seen live: a redelivered Activity Create
 reverted a rename that had already synced). Each event-store document records the `EventTime` of
 the webhook that last wrote it (`last_event_time`); a webhook whose `EventTime` isn't newer is
 answered `status=skipped reason=stale event` (HTTP 200) and changes nothing. A webhook with no
-usable `EventTime`, or a document without `last_event_time` (e.g. written by the backfill), is
-processed normally.
+usable `EventTime`, or a document without `last_event_time` (e.g. one first written by the
+backfill), is processed normally.
 
 **Deleted, archived, and hidden records are checked against Amilia.** `EventTime` can only order a
 webhook against a stored document, so Activity and Program Create/Update also ask Amilia's REST API
@@ -162,7 +172,7 @@ To run a script against the configured calendar, read the ID from the secret:
 `GOOGLE_CALENDAR_ID=$(gcloud secrets versions access latest --secret=google-calendar-id)`.
 
 ### Amilia REST API credentials (Program/Activity sync)
-`src/webhook/amilia_client.py` fetches per-occurrence schedule data (Start/End/Location) that Amilia's
+`src/shared/amilia_client.py` fetches per-occurrence schedule data (Start/End/Location) that Amilia's
 webhooks don't carry, plus each Activity's and Program's current state (see "What gets synced"), using a dedicated Amilia user account rather than the runtime service
 account (Amilia has no concept of a GCP identity). Terraform creates the
 `amilia-api-username` / `amilia-api-password` secret *containers* only — it cannot set real
@@ -207,9 +217,8 @@ standalone bulk loader that seeds the event store (and creates matching calendar
 Every Activity calendar event's description is built from Amilia's `Description`/`Note`/
 `Prerequisite` fields, each its own paragraph — `Description` has no header (Amilia already sends
 it as HTML), `Note` and `Prerequisite` each get one, and either is omitted entirely when null or
-empty. Same logic in both the live webhook (`handle_activity`) and the backfill script, each with
-its own copy (`_build_activity_description` / `build_activity_description`) per the
-no-cross-import rule above.
+empty. The backfill, the live webhook and the reconciler share that logic
+(`src/shared/activities.py`).
 
 Every Activity and FacilityBooking calendar event also carries two
 `extendedProperties.private` fields — `amilia_type` (`"Activity"` or `"FacilityBooking"`) and
@@ -219,9 +228,11 @@ anywhere in the Calendar UI, and "private" only means they don't propagate to ot
 copies of the event — any caller with ordinary read access to the event via the API can still read
 them, there's no per-app access restriction.
 
-Safe to re-run (won't duplicate calendar events already recorded). Deliberately doesn't import
-anything from `src/webhook/` — see its own module docstring for why. Run once, before relying on
-live sync, impersonating the function's own service account:
+Safe to re-run (won't duplicate calendar events already recorded). It doesn't import anything
+from `src/webhook/`; what it shares with the functions (the Amilia client, the record and event
+definitions) lives in `src/shared/`. Rewriting a record keeps its `last_event_time`, so stale-webhook
+detection survives a backfill. Run once, before relying on live sync, impersonating the function's
+own service account:
 ```
 gcloud auth application-default login \
   --impersonate-service-account=$SA_EMAIL
@@ -231,6 +242,16 @@ GOOGLE_EVENT_STORE_BUCKET=... PYTHONPATH=src .venv/bin/python scripts/backfill.p
   --org-id $AMILIA_ORG_ID --amilia-username <user> --amilia-password <pass> --dry-run
 ```
 Drop `--dry-run` once the preview output looks right.
+
+**Updating existing events.** By default an occurrence that already has an event is left alone.
+`--update-existing` also reads each existing Activity event and patches only the fields that
+differ from Amilia (title, times, location, description, Amilia tags), e.g. to add locations to
+events created before they were synced. It **never deletes or recreates** an event: a missing or
+cancelled one is reported and left alone, and hidden Activities and offline Programs are skipped.
+Hand edits to those fields on the calendar are overwritten, so always preview first:
+`--update-existing --dry-run` prints each change (`event 85hn… location: None -> 'Wood shop'`)
+without writing anything. Each run summarises every Activity as `created=`/`updated=`/
+`unchanged=`/`missing=` counts.
 
 ### Bulk delete (testing / emergency cleanup)
 `scripts/bulk_delete.py` deletes event-store documents (and optionally the
@@ -248,8 +269,10 @@ Two separately deployed Cloud Functions, each its own self-contained directory:
 
 ```
 src/
-  shared/       calendar_client.py, event_store.py — the single source of truth for both
-  webhook/      main.py (amilia_webhook) + handlers.py, amilia_client.py, reconcile_queue.py
+  shared/       amilia_client.py, calendar_client.py, event_store.py, activities.py, … — the
+                single source of truth for the functions and scripts/backfill.py
+  webhook/      main.py (amilia_webhook, process_webhook_task) + handlers.py, reconcile_queue.py,
+                webhook_queue.py, retry_policy.py
   reconciler/   main.py (reconcile_activity) — the Cloud Tasks worker
 scripts/        check_access.py, check_storage_access.py, build.sh, backfill.py, bulk_delete.py
 test/
