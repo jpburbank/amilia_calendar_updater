@@ -51,6 +51,16 @@ Add --dry-run first to preview what would happen without writing anything.
 Safe to re-run: an occurrence that already has a stored calendar_event_id
 is left alone rather than duplicated.
 
+--update-existing also brings existing Activity events up to date (e.g. to
+add the per-occurrence location to events created before it was synced):
+each existing event is read, and only the fields that differ from Amilia
+are patched. It never deletes or recreates an event, and never touches a
+hidden Activity or one whose Program is offline. Anything edited by hand on
+the calendar in those fields is overwritten, so run it with --dry-run
+first: that prints every field that would change, e.g.
+    event 85hn... location: None -> 'Wood shop'
+without writing anything.
+
 Scope: every Program (there are only ever a handful). Every Activity whose
 EndDate is not more than --lookback-days in the past (default 30) — no
 upper/forward bound, so anything upcoming is always included regardless of
@@ -84,11 +94,11 @@ from datetime import UTC, datetime, timedelta
 import google.auth
 import google.auth.transport.requests
 
+from shared.activities import activity_event_fields, activity_record, stored_occurrence
 from shared.amilia_client import AmiliaClient
 from shared.calendar_client import CalendarClient, stable_event_id
 from shared.event_store import EventStore
 from shared.feature_flags import facility_booking_sync_enabled
-from shared.locations import occurrence_location, schedule_location
 from shared.titles import clean_title
 
 REQUEST_PACING_SECONDS = 0.2  # be gentle on Amilia's API
@@ -140,27 +150,37 @@ def backfill_program(event_store: EventStore, program: dict, *, dry_run: bool) -
     return online
 
 
-def build_activity_description(activity: dict) -> str | None:
+def event_changes(event: dict, fields: dict) -> dict:
     """
-    Builds the calendar event description from Description/Note/Prerequisite,
-    each its own paragraph. Description has no header (Amilia already sends
-    it as its own HTML paragraph(s)); Note and Prerequisite each get an HTML
-    header matching that same style, and are omitted entirely when null or
-    empty rather than shown blank. Same fields, same names, on both the REST
-    activity dict here and the webhook payload in handle_activity — kept as
-    a separate copy per this script's module docstring, not shared.
+    {field: (calendar value, wanted value)} for every field of `fields` (as
+    built by activity_event_fields) that the calendar event doesn't already
+    match. Times are compared as instants, since the calendar returns them in
+    UTC; extended properties only need to contain the wanted keys.
     """
-    paragraphs = []
-    description = activity.get("Description")
-    if description:
-        paragraphs.append(description)
-    note = activity.get("Note")
-    if note:
-        paragraphs.append(f"<p><strong>Note</strong><br>{note}</p>")
-    prerequisite = activity.get("Prerequisite")
-    if prerequisite:
-        paragraphs.append(f"<p><strong>Prerequisite</strong><br>{prerequisite}</p>")
-    return "\n".join(paragraphs) if paragraphs else None
+    current = {
+        "summary": event.get("summary"),
+        "start_iso": (event.get("start") or {}).get("dateTime"),
+        "end_iso": (event.get("end") or {}).get("dateTime"),
+        "location": event.get("location"),
+        "description": event.get("description"),
+        "extended_properties": (event.get("extendedProperties") or {}).get("private") or {},
+    }
+    changes = {}
+    for name, wanted in fields.items():
+        have = current[name]
+        if name in ("start_iso", "end_iso"):
+            same = have is not None and _instant(have) == _instant(wanted)
+        elif name == "extended_properties":
+            same = all(have.get(key) == value for key, value in wanted.items())
+        else:
+            same = (have or None) == (wanted or None)
+        if not same:
+            changes[name] = (have, wanted)
+    return changes
+
+
+def _instant(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def backfill_activity(
@@ -172,7 +192,15 @@ def backfill_activity(
     *,
     program_online: bool,
     dry_run: bool,
+    update_existing: bool = False,
 ) -> None:
+    """
+    Creates a calendar event for every visible occurrence that has none. With
+    update_existing, also patches existing events whose title, times,
+    location, description or Amilia tags differ from Amilia's; it never
+    deletes or recreates one (a missing or cancelled event is reported and
+    left alone, since removing and repopulating events is done by hand).
+    """
     activity_id = activity["Id"]
     status = activity.get("Status")
     visible = program_online and status == "Normal"
@@ -181,49 +209,41 @@ def backfill_activity(
     existing_occurrences = (existing or {}).get("occurrences") or {}
 
     occurrences = amilia.get_activity_occurrences(org_id, activity_id)
-    location = schedule_location(activity)
-    summary = clean_title(activity.get("Name"), "Activity")
-    description = build_activity_description(activity)
-    extended_properties = {"amilia_type": "Activity", "amilia_type_id": str(activity_id)}
+    record = activity_record(activity, status)
 
     occurrence_map = {}
-    created = 0
+    counts = {"created": 0, "updated": 0, "unchanged": 0, "missing": 0}
     for occurrence in occurrences:
         occurrence_id = str(occurrence["Id"])
         previous = existing_occurrences.get(occurrence_id) or {}
         calendar_event_id = previous.get("calendar_event_id")
-        occurrence_loc = occurrence_location(occurrence, activity)
+        stored = stored_occurrence(occurrence, activity)
+        fields = activity_event_fields(activity_id, record, stored)
 
         if visible and not calendar_event_id:
             if not dry_run:
                 event = calendar_client.create_event(
-                    event_id=stable_event_id("Activity", activity_id, occurrence_id),
-                    summary=summary,
-                    start_iso=occurrence["Start"],
-                    end_iso=occurrence["End"],
-                    location=occurrence_loc,
-                    description=description,
-                    extended_properties=extended_properties,
+                    event_id=stable_event_id("Activity", activity_id, occurrence_id), **fields
                 )
                 calendar_event_id = event["id"]
-            created += 1
+            counts["created"] += 1
+        elif visible and update_existing:
+            counts[
+                _update_existing_event(calendar_client, calendar_event_id, fields, dry_run=dry_run)
+            ] += 1
 
-        occurrence_map[occurrence_id] = {
-            "start": occurrence["Start"],
-            "end": occurrence["End"],
-            "location": occurrence_loc,
-            "calendar_event_id": calendar_event_id,
-        }
+        occurrence_map[occurrence_id] = {**stored, "calendar_event_id": calendar_event_id}
 
+    summary = " ".join(f"{name}={count}" for name, count in counts.items() if count)
     print(
         f"  Activity {activity_id} {activity.get('Name')!r}: visible={visible} "
-        f"occurrences={len(occurrence_map)} created={created}"
+        f"occurrences={len(occurrence_map)} {summary}".rstrip()
     )
 
     if dry_run:
         return
 
-    program_id = activity.get("ProgramId") or None
+    program_id = record["program_id"]
     if program_id:
         event_store.add_membership("Program", program_id, "Activities", activity_id)
 
@@ -231,20 +251,32 @@ def backfill_activity(
         "Activity",
         activity_id,
         {
-            "name": clean_title(activity.get("Name")),
-            "program_id": program_id,
-            "category_id": activity.get("CategoryId") or None,
-            "category_name": activity.get("CategoryName"),
-            "sub_category_id": activity.get("SubCategoryId") or None,
-            "sub_category_name": activity.get("SubCategoryName"),
-            "status": status,
-            "start_date": activity.get("StartDate"),
-            "end_date": activity.get("EndDate"),
-            "location": location,
+            **record,
             "occurrences": occurrence_map,
+            # Kept, so a webhook older than the last one applied is still
+            # recognised as stale after a backfill.
+            "last_event_time": (existing or {}).get("last_event_time"),
         },
-        custom_time=activity.get("EndDate"),
+        custom_time=record["end_date"],
     )
+
+
+def _update_existing_event(
+    calendar_client: CalendarClient, calendar_event_id: str, fields: dict, *, dry_run: bool
+) -> str:
+    """Patches one existing event if it differs. Returns which count it falls under."""
+    event = calendar_client.get_event(calendar_event_id)
+    if event is None or event.get("status") == "cancelled":
+        print(f"    event {calendar_event_id}: missing or cancelled, left alone")
+        return "missing"
+    changes = event_changes(event, fields)
+    if not changes:
+        return "unchanged"
+    for name, (have, wanted) in changes.items():
+        print(f"    event {calendar_event_id} {name}: {have!r} -> {wanted!r}")
+    if not dry_run:
+        calendar_client.update_event(calendar_event_id, **{name: fields[name] for name in changes})
+    return "updated"
 
 
 def backfill_facility_booking(
@@ -354,6 +386,13 @@ def main() -> int:
         "'unbounded').",
     )
     parser.add_argument(
+        "--update-existing",
+        action="store_true",
+        help="Also patch existing Activity events whose title, times, location, description or "
+        "Amilia tags differ from Amilia's. Never deletes or recreates an event. With --dry-run, "
+        "prints each change without writing it.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print what would happen without writing to the calendar or the store.",
@@ -411,6 +450,7 @@ def main() -> int:
                     activity,
                     program_online=program_online_by_id.get(program["Id"], True),
                     dry_run=args.dry_run,
+                    update_existing=args.update_existing,
                 )
             except Exception as exc:
                 failed.append((activity["Id"], str(exc)))
