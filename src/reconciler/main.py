@@ -12,18 +12,22 @@ retry mechanism is ours to configure and is actually useful here, so a
 real failure returns a real error status and lets Cloud Tasks retry that
 one task on its own schedule instead.
 
-Does not call the Amilia REST API. Each occurrence's Start/End is already
-stored on the Activity's own document from its last Create/Update (see
-../webhook/handlers.py); only whether it should currently be *on* the
-calendar changes here, never when or where it happens.
+Does not call the Amilia REST API. Everything an event needs (name,
+description, each occurrence's Start/End/location) is already stored on the
+Activity's own document from its last Create/Update or backfill, and
+shared/activities.py turns it into the same event fields the webhook
+writes; only whether it should currently be *on* the calendar changes here,
+never when or where it happens. Records stored before the description was
+kept give events without one until their Activity is next updated.
 
 Layout: this directory (src/reconciler/) is exactly what --source points
 at, deliberately separate from src/webhook/ (Cloud Functions' buildpack
 deploy always imports a file named main.py from --source, so two
 functions can't share one source tree even though they share code) —
 this one intentionally carries none of the webhook-only dependencies
-(Cloud Tasks client, requests, handlers.py, amilia_client.py). shared/
-here is a generated copy of ../shared/, not hand-maintained — run
+(Cloud Tasks client, requests, handlers.py). Its shared/ copy includes
+amilia_client.py, which is never imported here, so `requests` isn't
+needed. shared/ here is a generated copy of ../shared/, not hand-maintained — run
 scripts/build.sh from the repo root before every deploy to refresh it.
 
 Deploy (from the repo root):
@@ -53,9 +57,9 @@ import os
 import functions_framework
 from flask import Request, jsonify
 
+from shared.activities import activity_event_fields
 from shared.calendar_client import CalendarClient, stable_event_id
 from shared.event_store import EventStore
-from shared.titles import clean_title
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -110,10 +114,7 @@ def reconcile_activity(request: Request):
         if visible and not calendar_event_id:
             event = calendar_client.create_event(
                 event_id=stable_event_id("Activity", activity_id, occurrence_id),
-                summary=clean_title(activity.get("name"), "Activity"),
-                start_iso=occurrence["start"],
-                end_iso=occurrence["end"],
-                location=activity.get("location"),
+                **activity_event_fields(activity_id, activity, occurrence),
             )
             occurrence["calendar_event_id"] = event["id"]
             changed = True

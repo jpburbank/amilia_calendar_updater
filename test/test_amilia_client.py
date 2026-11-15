@@ -5,7 +5,7 @@ import logging
 
 import pytest
 
-from amilia_client import AUTHENTICATE_URL, AmiliaClient, AmiliaNotFound
+from shared.amilia_client import AUTHENTICATE_URL, AmiliaClient, AmiliaNotFound
 
 OCCURRENCES_URL = "https://app.amilia.com/api/v3/en/org/17659/activities/1/occurrences"
 ACTIVITY_URL = "https://app.amilia.com/api/v3/en/org/17659/activities/1"
@@ -238,7 +238,7 @@ def test_never_logs_the_bearer_token(caplog):
 
 
 def test_splits_large_response_bodies_across_log_entries(caplog, monkeypatch):
-    monkeypatch.setattr("amilia_client._LOG_CHUNK_CHARS", 10)
+    monkeypatch.setattr("shared.amilia_client._LOG_CHUNK_CHARS", 10)
     page = {"Items": [{"Id": 1, "Name": "x" * 40}], "Paging": {"TotalCount": 1}}
     session = _FakeSession(
         {
@@ -253,3 +253,57 @@ def test_splits_large_response_bodies_across_log_entries(caplog, monkeypatch):
 
     reassembled = "".join(line.split(" body=", 1)[1] for line in _rest_response_lines(caplog))
     assert reassembled == json.dumps(page)
+
+
+class _EmptyPagesSession:
+    """Every URL returns one empty, fully-paged response; records what params were sent."""
+
+    def __init__(self):
+        self.calls = []
+
+    def get(self, url, headers=None, auth=None, params=None):
+        self.calls.append({"url": url, "params": params})
+        if url == AUTHENTICATE_URL:
+            return _FakeResponse(200, {"Token": "tok"})
+        return _occurrences_page([], 0)
+
+
+def test_get_programs_requests_the_default_page_size():
+    client = AmiliaClient("u", "p", session=_EmptyPagesSession())
+
+    client.get_programs(17659)
+
+    call = next(c for c in client._session.calls if c["url"].endswith("/org/17659/programs"))
+    assert call["params"]["perPage"] == 2000
+
+
+def test_get_program_activities_requests_the_reduced_page_size():
+    """Regression test: this endpoint's real max is 1000, not 2000 like the
+    others — a perPage=2000 request 400s against the live API ("must be a
+    whole number between 5 and 1000")."""
+    client = AmiliaClient("u", "p", session=_EmptyPagesSession())
+
+    client.get_program_activities(17659, 107638)
+
+    call = next(c for c in client._session.calls if "activities" in c["url"])
+    assert call["params"]["perPage"] == 1000
+
+
+def test_get_activity_occurrences_requests_the_default_page_size():
+    client = AmiliaClient("u", "p", session=_EmptyPagesSession())
+
+    client.get_activity_occurrences(17659, 7311901)
+
+    call = next(c for c in client._session.calls if "occurrences" in c["url"])
+    assert call["params"]["perPage"] == 2000
+
+
+def test_get_reservations_requests_the_default_page_size_and_date_range():
+    client = AmiliaClient("u", "p", session=_EmptyPagesSession())
+
+    client.get_reservations(17659, "2026-01-01", "2026-12-31")
+
+    call = next(c for c in client._session.calls if "reservations" in c["url"])
+    assert call["params"]["perPage"] == 2000
+    assert call["params"]["from"] == "2026-01-01"
+    assert call["params"]["to"] == "2026-12-31"

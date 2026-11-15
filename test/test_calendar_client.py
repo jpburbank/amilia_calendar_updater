@@ -40,6 +40,13 @@ class _FakeEvents:
             return _FakeRequest(error=HttpError(_Resp(self.insert_status), b"{}"))
         return _FakeRequest({"id": body.get("id", "random"), **body})
 
+    def get(self, calendarId, eventId):
+        if eventId == "missing":
+            return _FakeRequest(error=HttpError(_Resp(404), b"{}"))
+        if eventId == "broken":
+            return _FakeRequest(error=HttpError(_Resp(500), b"{}"))
+        return _FakeRequest({"id": eventId, "status": "confirmed"})
+
     def patch(self, calendarId, eventId, body):
         self.patched.append((eventId, body))
         return _FakeRequest({"id": eventId, **body})
@@ -149,3 +156,23 @@ def test_logs_delete_response(caplog):
         _client(_FakeEvents()).delete_event("evt1")
 
     assert "operation=delete event_id=evt1" in _response_lines(caplog)[0]
+
+
+def test_get_event_returns_the_event():
+    assert _client(_FakeEvents()).get_event("evt1") == {"id": "evt1", "status": "confirmed"}
+
+
+def test_get_event_is_none_when_the_event_does_not_exist():
+    assert _client(_FakeEvents()).get_event("missing") is None
+
+
+def test_get_event_propagates_other_errors():
+    with pytest.raises(HttpError):
+        _client(_FakeEvents()).get_event("broken")
+
+
+def test_logs_fetched_event(caplog):
+    with caplog.at_level(logging.INFO):
+        _client(_FakeEvents()).get_event("evt1")
+
+    assert "operation=get event_id=evt1" in _response_lines(caplog)[0]

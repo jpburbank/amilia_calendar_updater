@@ -166,6 +166,19 @@ class CalendarClient:
         _log_response("patch", event_id, event)
         return event
 
+    def get_event(self, event_id: str) -> dict | None:
+        """The event as the calendar has it now, or None if it doesn't exist."""
+        try:
+            event = (
+                self._service.events().get(calendarId=self.calendar_id, eventId=event_id).execute()
+            )
+        except HttpError as exc:
+            if exc.resp.status == 404:
+                return None
+            raise
+        _log_response("get", event_id, event)
+        return event
+
     def delete_event(self, event_id: str) -> None:
         response = (
             self._service.events().delete(calendarId=self.calendar_id, eventId=event_id).execute()

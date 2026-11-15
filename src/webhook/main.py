@@ -48,7 +48,7 @@ Deploy:
   #   gcloud secrets versions access latest --secret=amilia-webhook-token
 
   # Program/Activity sync needs three more things, all set up by the same
-  # Terraform project — see amilia_client.py, reconcile_queue.py, and
+  # Terraform project — see shared/amilia_client.py, reconcile_queue.py, and
   # ../reconciler/main.py:
   #   1. A dedicated Amilia user for REST API access (occurrence data the
   #      webhooks don't carry). Terraform creates the amilia-api-username /
@@ -116,10 +116,10 @@ from datetime import UTC, datetime
 import functions_framework
 from flask import Request, jsonify
 
-from amilia_client import AmiliaClient
 from handlers import handle_activity, handle_facility_booking, handle_program
 from reconcile_queue import ReconcileQueue
 from retry_policy import is_transient
+from shared.amilia_client import AmiliaClient
 from shared.calendar_client import CalendarClient
 from shared.event_store import EventStore
 from shared.feature_flags import facility_booking_sync_enabled
