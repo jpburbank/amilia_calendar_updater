@@ -31,8 +31,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from amilia_client import AmiliaClient, AmiliaNotFound
 from reconcile_queue import ReconcileQueue
+from shared.amilia_client import AmiliaClient, AmiliaNotFound
 from shared.calendar_client import CalendarClient, stable_event_id
 from shared.event_store import EventStore
 from shared.locations import occurrence_location, schedule_location

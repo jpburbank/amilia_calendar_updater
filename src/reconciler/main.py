@@ -22,8 +22,9 @@ at, deliberately separate from src/webhook/ (Cloud Functions' buildpack
 deploy always imports a file named main.py from --source, so two
 functions can't share one source tree even though they share code) —
 this one intentionally carries none of the webhook-only dependencies
-(Cloud Tasks client, requests, handlers.py, amilia_client.py). shared/
-here is a generated copy of ../shared/, not hand-maintained — run
+(Cloud Tasks client, requests, handlers.py). Its shared/ copy includes
+amilia_client.py, which is never imported here, so `requests` isn't
+needed. shared/ here is a generated copy of ../shared/, not hand-maintained — run
 scripts/build.sh from the repo root before every deploy to refresh it.
 
 Deploy (from the repo root):

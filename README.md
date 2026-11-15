@@ -162,7 +162,7 @@ To run a script against the configured calendar, read the ID from the secret:
 `GOOGLE_CALENDAR_ID=$(gcloud secrets versions access latest --secret=google-calendar-id)`.
 
 ### Amilia REST API credentials (Program/Activity sync)
-`src/webhook/amilia_client.py` fetches per-occurrence schedule data (Start/End/Location) that Amilia's
+`src/shared/amilia_client.py` fetches per-occurrence schedule data (Start/End/Location) that Amilia's
 webhooks don't carry, plus each Activity's and Program's current state (see "What gets synced"), using a dedicated Amilia user account rather than the runtime service
 account (Amilia has no concept of a GCP identity). Terraform creates the
 `amilia-api-username` / `amilia-api-password` secret *containers* only — it cannot set real
@@ -248,8 +248,10 @@ Two separately deployed Cloud Functions, each its own self-contained directory:
 
 ```
 src/
-  shared/       calendar_client.py, event_store.py — the single source of truth for both
-  webhook/      main.py (amilia_webhook) + handlers.py, amilia_client.py, reconcile_queue.py
+  shared/       amilia_client.py, calendar_client.py, event_store.py, activities.py, … — the
+                single source of truth for the functions and scripts/backfill.py
+  webhook/      main.py (amilia_webhook, process_webhook_task) + handlers.py, reconcile_queue.py,
+                webhook_queue.py, retry_policy.py
   reconciler/   main.py (reconcile_activity) — the Cloud Tasks worker
 scripts/        check_access.py, check_storage_access.py, build.sh, backfill.py, bulk_delete.py
 test/

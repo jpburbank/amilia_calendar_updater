@@ -4,8 +4,8 @@ import logging
 
 import pytest
 
-from amilia_client import AmiliaNotFound
 from handlers import handle_activity, handle_facility_booking, handle_program
+from shared.amilia_client import AmiliaNotFound
 from shared.calendar_client import stable_event_id
 
 
