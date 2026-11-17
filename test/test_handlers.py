@@ -565,7 +565,10 @@ def test_activity_event_location_comes_from_the_occurrence(action):
         amilia_client=_FakeAmiliaClient(occurrences=_WOOD_SHOP_OCCURRENCE),
     )
 
-    assert calendar_client.calls[0]["location"] == "Wood shop"
+    assert (
+        calendar_client.calls[0]["location"]
+        == "Wood shop, 39449 Queens Way #1, Squamish, BC V8B 0R5"
+    )
     stored = event_store.get("Activity", 7311901)["occurrences"]["141658523"]
     assert stored["location"] == "Wood shop"
 
@@ -591,7 +594,10 @@ def test_activity_update_patches_existing_event_with_occurrence_location():
 
     assert calendar_client.update_calls[0] == (
         "evt_existing",
-        {**calendar_client.update_calls[0][1], "location": "Wood shop"},
+        {
+            **calendar_client.update_calls[0][1],
+            "location": "Wood shop, 39449 Queens Way #1, Squamish, BC V8B 0R5",
+        },
     )
 
 
@@ -609,7 +615,10 @@ def test_activity_location_falls_back_to_the_activitys_schedules():
         amilia_client=_FakeAmiliaClient(occurrences=_ONE_OCCURRENCE, activity=current),
     )
 
-    assert calendar_client.calls[0]["location"] == "Metal shop"
+    assert (
+        calendar_client.calls[0]["location"]
+        == "Metal shop, 39449 Queens Way #1, Squamish, BC V8B 0R5"
+    )
     assert event_store.get("Activity", 7311901)["location"] == "Metal shop"
 
 

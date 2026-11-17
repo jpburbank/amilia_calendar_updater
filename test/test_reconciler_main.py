@@ -97,7 +97,10 @@ def test_program_now_online_creates_missing_calendar_event(monkeypatch):
     assert status_code == 200
     assert body["visible"] is True
     assert body["changed"] is True
-    assert calendar_client.calls[0]["location"] == "Metal shop"
+    assert (
+        calendar_client.calls[0]["location"]
+        == "Metal shop, 39449 Queens Way #1, Squamish, BC V8B 0R5"
+    )
     assert (
         event_store.documents[("Activity", "111")]["occurrences"]["a"]["calendar_event_id"]
         == "evt_new"
@@ -126,7 +129,10 @@ def test_occurrence_location_wins_over_activity_location(monkeypatch):
 
     _call("111", monkeypatch, calendar_client, event_store)
 
-    assert calendar_client.calls[0]["location"] == "Wood shop"
+    assert (
+        calendar_client.calls[0]["location"]
+        == "Wood shop, 39449 Queens Way #1, Squamish, BC V8B 0R5"
+    )
 
 
 def test_created_event_carries_description_and_amilia_tags(monkeypatch):

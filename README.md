@@ -32,9 +32,12 @@ the backfill runs with `--update-existing`. See `src/shared/titles.py`.
 Activity, and the Activity webhook never carries one. Each Activity event's location is the
 occurrence's `Location.Name` (REST `activities/{id}/occurrences`), falling back to the distinct
 names in the Activity's `Schedules[].Locations[].Name` (REST `activities/{id}`). It's stored per
-occurrence, so the reconciler reuses it without another REST call. Events created earlier have
-no location until their Activity is next updated or the backfill runs with `--update-existing`.
-See `src/shared/locations.py`.
+occurrence, so the reconciler reuses it without another REST call. Those names are rooms in one
+building, so the event's location is the room followed by the building's street address
+(`Wood shop, 39449 Queens Way #1, Squamish, BC V8B 0R5`), or just the address when there's no
+room; the address is what lets Google Calendar link to Google Maps. Records store only the room.
+Events created earlier keep their old location until their Activity is next updated or the
+backfill runs with `--update-existing`. See `src/shared/locations.py`.
 
 **Activity dates come from REST.** The Activity webhook's `StartDate`/`EndDate` carry the wrong
 UTC offset (Pacific times labelled `-04:00`, then `-05:00`), so the stored `start_date`/`end_date`,
