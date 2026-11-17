@@ -1,8 +1,11 @@
 """Tests for what an Activity's stored record and calendar events contain."""
 
+import pytest
+
 from shared.activities import (
     activity_event_fields,
     activity_record,
+    booking_url,
     build_activity_description,
     stored_occurrence,
 )
@@ -78,6 +81,56 @@ def test_build_activity_description_header_only_field_without_description():
     assert build_activity_description(activity) == (
         "<p><strong>Contact person at organization</strong><br>Sam Lee</p>"
     )
+
+
+_URL = "https://app.amilia.com/store/en/create-makerspace/shop/activities/7493601"
+_SECRET_URL = (
+    "https://app.amilia.com/store/en/create-makerspace/api/Activity/Detail?activityId=xAoA8l6"
+)
+
+
+def test_build_activity_description_book_now_link_above_description():
+    activity = {"Url": _URL, "SecretUrl": _SECRET_URL, "Description": "<p>About the class.</p>"}
+
+    assert build_activity_description(activity) == (
+        f'<p><a href="{_URL}">Book Now</a></p>\n<p>About the class.</p>'
+    )
+
+
+def test_build_activity_description_book_now_link_alone():
+    assert build_activity_description({"Url": _URL}) == f'<p><a href="{_URL}">Book Now</a></p>'
+
+
+def test_build_activity_description_escapes_link_href():
+    activity = {"Url": 'https://example.com/a?x=1&y="2"'}
+
+    assert build_activity_description(activity) == (
+        '<p><a href="https://example.com/a?x=1&amp;y=&quot;2&quot;">Book Now</a></p>'
+    )
+
+
+def test_booking_url_prefers_url():
+    assert booking_url({"Url": _URL, "SecretUrl": _SECRET_URL}) == _URL
+
+
+@pytest.mark.parametrize(
+    "url", [None, "", "   ", "not a url", "ftp://example.com/x", "https://", 42]
+)
+def test_booking_url_falls_back_to_secret_url_when_url_invalid(url):
+    assert booking_url({"Url": url, "SecretUrl": _SECRET_URL}) == _SECRET_URL
+
+
+def test_booking_url_falls_back_to_secret_url_when_url_missing():
+    assert booking_url({"SecretUrl": _SECRET_URL}) == _SECRET_URL
+
+
+def test_booking_url_strips_whitespace():
+    assert booking_url({"Url": f"  {_URL}  "}) == _URL
+
+
+@pytest.mark.parametrize("secret_url", [None, "", "/relative/path"])
+def test_booking_url_none_when_neither_valid(secret_url):
+    assert booking_url({"Url": "", "SecretUrl": secret_url}) is None
 
 
 def test_build_activity_description_none_when_nothing_present():
