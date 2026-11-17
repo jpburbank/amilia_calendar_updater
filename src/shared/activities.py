@@ -15,6 +15,9 @@ without calling Amilia.
 
 from __future__ import annotations
 
+import html
+from urllib.parse import urlsplit
+
 from shared.locations import occurrence_location, schedule_location
 from shared.titles import clean_title
 
@@ -27,16 +30,39 @@ _HEADED_DESCRIPTION_FIELDS = (
 )
 
 
+def _valid_url(value) -> str | None:
+    """`value` stripped, if it's an absolute http(s) URL; otherwise None."""
+    if not isinstance(value, str):
+        return None
+    url = value.strip()
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        return None
+    return url
+
+
+def booking_url(activity: dict) -> str | None:
+    """
+    The activity's store page: Url if it's a valid http(s) URL, else
+    SecretUrl if that is; None when neither is.
+    """
+    return _valid_url(activity.get("Url")) or _valid_url(activity.get("SecretUrl"))
+
+
 def build_activity_description(activity: dict) -> str | None:
     """
-    Builds the calendar event description from Description followed by
-    Note, Prerequisite, AdditionalInformation and ResponsibleName, each its
-    own paragraph. Description has no header (Amilia already sends it as
-    its own HTML paragraph(s)); the others each get an HTML header matching
-    that same style, and are omitted entirely when null or empty rather
-    than shown blank.
+    Builds the calendar event description: a "Book Now" link (see
+    booking_url), then Description, then Note, Prerequisite,
+    AdditionalInformation and ResponsibleName, each its own paragraph.
+    Description has no header (Amilia already sends it as its own HTML
+    paragraph(s)); the others each get an HTML header matching that same
+    style. Anything null or empty — including the link, when there's no
+    valid URL — is omitted entirely rather than shown blank.
     """
     paragraphs = []
+    url = booking_url(activity)
+    if url:
+        paragraphs.append(f'<p><a href="{html.escape(url)}">Book Now</a></p>')
     description = activity.get("Description")
     if description:
         paragraphs.append(description)
