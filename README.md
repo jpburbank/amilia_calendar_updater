@@ -214,10 +214,11 @@ standalone bulk loader that seeds the event store (and creates matching calendar
   it here too would duplicate that occurrence's calendar event (confirmed in production before
   this exclusion: 251 of 457 FacilityBooking documents had an `AC-` prefix, every one a duplicate).
 
-Every Activity calendar event's description is built from Amilia's `Description`/`Note`/
-`Prerequisite` fields, each its own paragraph — `Description` has no header (Amilia already sends
-it as HTML), `Note` and `Prerequisite` each get one, and either is omitted entirely when null or
-empty. The backfill, the live webhook and the reconciler share that logic
+Every Activity calendar event's description is built from Amilia's `Description`, `Note`,
+`Prerequisite`, `AdditionalInformation` and `ResponsibleName` fields, in that order, each its own
+paragraph — `Description` has no header (Amilia already sends it as HTML); the others get the
+headers "Note", "Prerequisite", "Additional Information" and "Contact person at organization",
+and each is omitted entirely when null or empty. The backfill, the live webhook and the reconciler share that logic
 (`src/shared/activities.py`).
 
 Every Activity and FacilityBooking calendar event also carries two

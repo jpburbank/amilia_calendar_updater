@@ -30,30 +30,54 @@ _OCCURRENCE = {
 }
 
 
-def test_build_activity_description_all_three_fields():
+def test_build_activity_description_all_fields_in_order():
     activity = {
         "Description": "<p>About the class.</p>",
         "Note": "Bring your own tools.",
         "Prerequisite": "Ages 10+",
+        "AdditionalInformation": "Parking at the back.",
+        "ResponsibleName": "Sam Lee",
     }
 
     assert build_activity_description(activity) == (
         "<p>About the class.</p>\n"
         "<p><strong>Note</strong><br>Bring your own tools.</p>\n"
-        "<p><strong>Prerequisite</strong><br>Ages 10+</p>"
+        "<p><strong>Prerequisite</strong><br>Ages 10+</p>\n"
+        "<p><strong>Additional Information</strong><br>Parking at the back.</p>\n"
+        "<p><strong>Contact person at organization</strong><br>Sam Lee</p>"
     )
 
 
-def test_build_activity_description_omits_null_note_and_prerequisite():
-    activity = {"Description": "<p>About the class.</p>", "Note": None, "Prerequisite": None}
+def test_build_activity_description_omits_null_headed_fields():
+    activity = {
+        "Description": "<p>About the class.</p>",
+        "Note": None,
+        "Prerequisite": None,
+        "AdditionalInformation": None,
+        "ResponsibleName": None,
+    }
 
     assert build_activity_description(activity) == "<p>About the class.</p>"
 
 
-def test_build_activity_description_omits_empty_string_note_and_prerequisite():
-    activity = {"Description": "<p>About the class.</p>", "Note": "", "Prerequisite": ""}
+def test_build_activity_description_omits_empty_string_headed_fields():
+    activity = {
+        "Description": "<p>About the class.</p>",
+        "Note": "",
+        "Prerequisite": "",
+        "AdditionalInformation": "",
+        "ResponsibleName": "",
+    }
 
     assert build_activity_description(activity) == "<p>About the class.</p>"
+
+
+def test_build_activity_description_header_only_field_without_description():
+    activity = {"Description": None, "ResponsibleName": "Sam Lee"}
+
+    assert build_activity_description(activity) == (
+        "<p><strong>Contact person at organization</strong><br>Sam Lee</p>"
+    )
 
 
 def test_build_activity_description_none_when_nothing_present():
