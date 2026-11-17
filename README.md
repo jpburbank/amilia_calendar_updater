@@ -32,9 +32,12 @@ the backfill runs with `--update-existing`. See `src/shared/titles.py`.
 Activity, and the Activity webhook never carries one. Each Activity event's location is the
 occurrence's `Location.Name` (REST `activities/{id}/occurrences`), falling back to the distinct
 names in the Activity's `Schedules[].Locations[].Name` (REST `activities/{id}`). It's stored per
-occurrence, so the reconciler reuses it without another REST call. Events created earlier have
-no location until their Activity is next updated or the backfill runs with `--update-existing`.
-See `src/shared/locations.py`.
+occurrence, so the reconciler reuses it without another REST call. Those names are rooms in one
+building, so the event's location is the room followed by the building's street address
+(`Wood shop, 39449 Queens Way #1, Squamish, BC V8B 0R5`), or just the address when there's no
+room; the address is what lets Google Calendar link to Google Maps. Records store only the room.
+Events created earlier keep their old location until their Activity is next updated or the
+backfill runs with `--update-existing`. See `src/shared/locations.py`.
 
 **Activity dates come from REST.** The Activity webhook's `StartDate`/`EndDate` carry the wrong
 UTC offset (Pacific times labelled `-04:00`, then `-05:00`), so the stored `start_date`/`end_date`,
@@ -214,11 +217,14 @@ standalone bulk loader that seeds the event store (and creates matching calendar
   it here too would duplicate that occurrence's calendar event (confirmed in production before
   this exclusion: 251 of 457 FacilityBooking documents had an `AC-` prefix, every one a duplicate).
 
-Every Activity calendar event's description is built from Amilia's `Description`/`Note`/
-`Prerequisite` fields, each its own paragraph — `Description` has no header (Amilia already sends
-it as HTML), `Note` and `Prerequisite` each get one, and either is omitted entirely when null or
-empty. The backfill, the live webhook and the reconciler share that logic
-(`src/shared/activities.py`).
+Every Activity calendar event's description starts with a "Book Now" link to the activity's
+`Url`, or to its `SecretUrl` when `Url` is missing or isn't a valid http(s) URL; when neither is
+valid, there's no link. After the link come Amilia's `Description`, `Note`, `Prerequisite`,
+`AdditionalInformation` and `ResponsibleName` fields, in that order, each its own paragraph —
+`Description` has no header (Amilia already sends it as HTML); the others get the headers "Note",
+"Prerequisite", "Additional Information" and "Contact person at organization", and each is
+omitted entirely when null or empty. The backfill, the live webhook and the reconciler share that
+logic (`src/shared/activities.py`).
 
 Every Activity and FacilityBooking calendar event also carries two
 `extendedProperties.private` fields — `amilia_type` (`"Activity"` or `"FacilityBooking"`) and

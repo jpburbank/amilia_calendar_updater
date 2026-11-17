@@ -1,6 +1,6 @@
 """Tests for picking an occurrence's calendar location."""
 
-from shared.locations import occurrence_location, schedule_location
+from shared.locations import event_location, occurrence_location, schedule_location
 
 # Shapes as returned live by Amilia's REST API on 2026-11-14.
 _OCCURRENCE = {"Id": 145865700, "Location": {"Id": 1923752, "Name": "Wood shop"}}
@@ -42,3 +42,11 @@ def test_schedule_location_joins_distinct_names_in_order():
     }
 
     assert schedule_location(activity) == "Wood shop, Metal shop"
+
+
+def test_event_location_puts_the_room_before_the_building_address():
+    assert event_location("Wood shop") == "Wood shop, 39449 Queens Way #1, Squamish, BC V8B 0R5"
+
+
+def test_event_location_without_a_room_is_just_the_building_address():
+    assert event_location(None) == "39449 Queens Way #1, Squamish, BC V8B 0R5"

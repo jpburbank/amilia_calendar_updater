@@ -1,8 +1,11 @@
 """Tests for what an Activity's stored record and calendar events contain."""
 
+import pytest
+
 from shared.activities import (
     activity_event_fields,
     activity_record,
+    booking_url,
     build_activity_description,
     stored_occurrence,
 )
@@ -30,30 +33,104 @@ _OCCURRENCE = {
 }
 
 
-def test_build_activity_description_all_three_fields():
+def test_build_activity_description_all_fields_in_order():
     activity = {
         "Description": "<p>About the class.</p>",
         "Note": "Bring your own tools.",
         "Prerequisite": "Ages 10+",
+        "AdditionalInformation": "Parking at the back.",
+        "ResponsibleName": "Sam Lee",
     }
 
     assert build_activity_description(activity) == (
         "<p>About the class.</p>\n"
         "<p><strong>Note</strong><br>Bring your own tools.</p>\n"
-        "<p><strong>Prerequisite</strong><br>Ages 10+</p>"
+        "<p><strong>Prerequisite</strong><br>Ages 10+</p>\n"
+        "<p><strong>Additional Information</strong><br>Parking at the back.</p>\n"
+        "<p><strong>Contact person at organization</strong><br>Sam Lee</p>"
     )
 
 
-def test_build_activity_description_omits_null_note_and_prerequisite():
-    activity = {"Description": "<p>About the class.</p>", "Note": None, "Prerequisite": None}
+def test_build_activity_description_omits_null_headed_fields():
+    activity = {
+        "Description": "<p>About the class.</p>",
+        "Note": None,
+        "Prerequisite": None,
+        "AdditionalInformation": None,
+        "ResponsibleName": None,
+    }
 
     assert build_activity_description(activity) == "<p>About the class.</p>"
 
 
-def test_build_activity_description_omits_empty_string_note_and_prerequisite():
-    activity = {"Description": "<p>About the class.</p>", "Note": "", "Prerequisite": ""}
+def test_build_activity_description_omits_empty_string_headed_fields():
+    activity = {
+        "Description": "<p>About the class.</p>",
+        "Note": "",
+        "Prerequisite": "",
+        "AdditionalInformation": "",
+        "ResponsibleName": "",
+    }
 
     assert build_activity_description(activity) == "<p>About the class.</p>"
+
+
+def test_build_activity_description_header_only_field_without_description():
+    activity = {"Description": None, "ResponsibleName": "Sam Lee"}
+
+    assert build_activity_description(activity) == (
+        "<p><strong>Contact person at organization</strong><br>Sam Lee</p>"
+    )
+
+
+_URL = "https://app.amilia.com/store/en/create-makerspace/shop/activities/7493601"
+_SECRET_URL = (
+    "https://app.amilia.com/store/en/create-makerspace/api/Activity/Detail?activityId=xAoA8l6"
+)
+
+
+def test_build_activity_description_book_now_link_above_description():
+    activity = {"Url": _URL, "SecretUrl": _SECRET_URL, "Description": "<p>About the class.</p>"}
+
+    assert build_activity_description(activity) == (
+        f'<p><a href="{_URL}">Book Now</a></p>\n<p>About the class.</p>'
+    )
+
+
+def test_build_activity_description_book_now_link_alone():
+    assert build_activity_description({"Url": _URL}) == f'<p><a href="{_URL}">Book Now</a></p>'
+
+
+def test_build_activity_description_escapes_link_href():
+    activity = {"Url": 'https://example.com/a?x=1&y="2"'}
+
+    assert build_activity_description(activity) == (
+        '<p><a href="https://example.com/a?x=1&amp;y=&quot;2&quot;">Book Now</a></p>'
+    )
+
+
+def test_booking_url_prefers_url():
+    assert booking_url({"Url": _URL, "SecretUrl": _SECRET_URL}) == _URL
+
+
+@pytest.mark.parametrize(
+    "url", [None, "", "   ", "not a url", "ftp://example.com/x", "https://", 42]
+)
+def test_booking_url_falls_back_to_secret_url_when_url_invalid(url):
+    assert booking_url({"Url": url, "SecretUrl": _SECRET_URL}) == _SECRET_URL
+
+
+def test_booking_url_falls_back_to_secret_url_when_url_missing():
+    assert booking_url({"SecretUrl": _SECRET_URL}) == _SECRET_URL
+
+
+def test_booking_url_strips_whitespace():
+    assert booking_url({"Url": f"  {_URL}  "}) == _URL
+
+
+@pytest.mark.parametrize("secret_url", [None, "", "/relative/path"])
+def test_booking_url_none_when_neither_valid(secret_url):
+    assert booking_url({"Url": "", "SecretUrl": secret_url}) is None
 
 
 def test_build_activity_description_none_when_nothing_present():
@@ -99,7 +176,7 @@ def test_activity_event_fields_from_record_and_occurrence():
         "summary": "Test - Bandsaw Bear Claws",
         "start_iso": "2027-01-01T09:30:00-07:00",
         "end_iso": "2027-01-01T12:30:00-07:00",
-        "location": "Wood shop",
+        "location": "Wood shop, 39449 Queens Way #1, Squamish, BC V8B 0R5",
         "description": "<p>About the class.</p>",
         "extended_properties": {"amilia_type": "Activity", "amilia_type_id": "7485693"},
     }
@@ -114,6 +191,6 @@ def test_activity_event_fields_fall_back_to_record_location_and_default_title():
 
     assert (fields["summary"], fields["location"], fields["description"]) == (
         "Activity",
-        "Metal shop",
+        "Metal shop, 39449 Queens Way #1, Squamish, BC V8B 0R5",
         None,
     )

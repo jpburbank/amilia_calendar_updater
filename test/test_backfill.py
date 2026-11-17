@@ -173,7 +173,10 @@ def test_backfill_activity_event_location_comes_from_the_occurrence():
         calendar_client, event_store, amilia, 17659, activity, program_online=True, dry_run=False
     )
 
-    assert calendar_client.calls[0]["location"] == "Wood shop"
+    assert (
+        calendar_client.calls[0]["location"]
+        == "Wood shop, 39449 Queens Way #1, Squamish, BC V8B 0R5"
+    )
     assert event_store.get("Activity", 7311901)["occurrences"]["111"]["location"] == "Wood shop"
 
 
@@ -193,7 +196,10 @@ def test_backfill_activity_location_falls_back_to_schedules():
         calendar_client, event_store, amilia, 17659, activity, program_online=True, dry_run=False
     )
 
-    assert calendar_client.calls[0]["location"] == "Metal shop"
+    assert (
+        calendar_client.calls[0]["location"]
+        == "Metal shop, 39449 Queens Way #1, Squamish, BC V8B 0R5"
+    )
 
 
 def test_backfill_activity_sets_amilia_type_extended_properties():
@@ -491,6 +497,9 @@ def _tracked_store(**record):
     )
 
 
+_WOOD_SHOP_LOCATION = "Wood shop, 39449 Queens Way #1, Squamish, BC V8B 0R5"
+
+
 def _calendar_event(**overrides):
     """evt_old as the calendar returns it: times in UTC, no location yet."""
     event = {
@@ -531,11 +540,13 @@ def test_update_existing_patches_only_the_fields_that_differ():
 
     _backfill(calendar_client, _tracked_store(), update_existing=True)
 
-    assert calendar_client.update_calls == [("evt_old", {"location": "Wood shop"})]
+    assert calendar_client.update_calls == [("evt_old", {"location": _WOOD_SHOP_LOCATION})]
 
 
 def test_update_existing_leaves_matching_events_unpatched():
-    calendar_client = _FakeCalendarClient(events={"evt_old": _calendar_event(location="Wood shop")})
+    calendar_client = _FakeCalendarClient(
+        events={"evt_old": _calendar_event(location=_WOOD_SHOP_LOCATION)}
+    )
 
     _backfill(calendar_client, _tracked_store(), update_existing=True)
 
@@ -550,7 +561,7 @@ def test_update_existing_dry_run_reads_and_prints_but_writes_nothing(capsys):
 
     assert calendar_client.update_calls == []
     assert event_store.set_calls == []
-    assert "event evt_old location: None -> 'Wood shop'" in capsys.readouterr().out
+    assert f"event evt_old location: None -> {_WOOD_SHOP_LOCATION!r}" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("event", [None, _calendar_event(status="cancelled")])
