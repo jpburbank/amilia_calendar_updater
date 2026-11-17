@@ -18,25 +18,32 @@ from __future__ import annotations
 from shared.locations import occurrence_location, schedule_location
 from shared.titles import clean_title
 
+# Fields after Description, in description order, each with its paragraph header.
+_HEADED_DESCRIPTION_FIELDS = (
+    ("Note", "Note"),
+    ("Prerequisite", "Prerequisite"),
+    ("AdditionalInformation", "Additional Information"),
+    ("ResponsibleName", "Contact person at organization"),
+)
+
 
 def build_activity_description(activity: dict) -> str | None:
     """
-    Builds the calendar event description from Description/Note/Prerequisite,
-    each its own paragraph. Description has no header (Amilia already sends
-    it as its own HTML paragraph(s)); Note and Prerequisite each get an HTML
-    header matching that same style, and are omitted entirely when null or
-    empty rather than shown blank.
+    Builds the calendar event description from Description followed by
+    Note, Prerequisite, AdditionalInformation and ResponsibleName, each its
+    own paragraph. Description has no header (Amilia already sends it as
+    its own HTML paragraph(s)); the others each get an HTML header matching
+    that same style, and are omitted entirely when null or empty rather
+    than shown blank.
     """
     paragraphs = []
     description = activity.get("Description")
     if description:
         paragraphs.append(description)
-    note = activity.get("Note")
-    if note:
-        paragraphs.append(f"<p><strong>Note</strong><br>{note}</p>")
-    prerequisite = activity.get("Prerequisite")
-    if prerequisite:
-        paragraphs.append(f"<p><strong>Prerequisite</strong><br>{prerequisite}</p>")
+    for field, header in _HEADED_DESCRIPTION_FIELDS:
+        value = activity.get(field)
+        if value:
+            paragraphs.append(f"<p><strong>{header}</strong><br>{value}</p>")
     return "\n".join(paragraphs) if paragraphs else None
 
 
