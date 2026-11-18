@@ -130,3 +130,27 @@ def test_get_event_is_none_when_the_event_does_not_exist():
 def test_get_event_propagates_other_errors():
     with pytest.raises(HttpError):
         _client(_FakeEvents()).get_event("broken")
+
+
+def test_create_sends_color_id_as_colorid():
+    events = _FakeEvents()
+
+    _client(events).create_event(**_ARGS, color_id="6")
+
+    assert events.inserted[0]["colorId"] == "6"
+
+
+def test_create_without_color_id_leaves_the_default_colour():
+    events = _FakeEvents()
+
+    _client(events).create_event(**_ARGS)
+
+    assert "colorId" not in events.inserted[0]
+
+
+def test_update_with_no_color_id_resets_to_the_default_colour():
+    events = _FakeEvents()
+
+    _client(events).update_event("abc123", color_id=None)
+
+    assert events.patched == [("abc123", {"colorId": None})]

@@ -18,7 +18,12 @@ from __future__ import annotations
 import html
 from urllib.parse import urlsplit
 
-from shared.locations import event_location, occurrence_location, schedule_location
+from shared.locations import (
+    event_colour_id,
+    event_location,
+    occurrence_location,
+    schedule_location,
+)
 from shared.titles import clean_title
 
 # Fields after Description, in description order, each with its paragraph header.
@@ -104,13 +109,16 @@ def activity_event_fields(activity_id, record: dict, occurrence: dict) -> dict:
     Keyword arguments for CalendarClient.create_event/update_event, from a
     stored record and one of its stored occurrences. The location is the
     occurrence's room (records written before per-occurrence locations fall
-    back to the record's own) plus the building address.
+    back to the record's own) plus the building address; the colour comes
+    from the room.
     """
+    room = occurrence.get("location") or record.get("location")
     return {
         "summary": clean_title(record.get("name"), "Activity"),
         "start_iso": occurrence["start"],
         "end_iso": occurrence["end"],
-        "location": event_location(occurrence.get("location") or record.get("location")),
+        "location": event_location(room),
+        "color_id": event_colour_id(room),
         "description": record.get("description"),
         "extended_properties": {"amilia_type": "Activity", "amilia_type_id": str(activity_id)},
     }
