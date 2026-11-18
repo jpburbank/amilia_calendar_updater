@@ -252,13 +252,17 @@ gcloud auth application-default login \
 
 GOOGLE_CALENDAR_ID=$(gcloud secrets versions access latest --secret=google-calendar-id) \
 GOOGLE_EVENT_STORE_BUCKET=... PYTHONPATH=src .venv/bin/python scripts/backfill.py \
-  --org-id $AMILIA_ORG_ID --amilia-username <user> --amilia-password <pass> --dry-run
+  --org-id $AMILIA_ORG_ID --dry-run
 ```
-Drop `--dry-run` once the preview output looks right.
+Drop `--dry-run` once the preview output looks right. The Amilia API username and password come
+from the `amilia-api-username` / `amilia-api-password` secrets — the same ones the functions use —
+read as the impersonated service account from gcloud's configured project (`--gcp-project` to
+override). Pass `--amilia-username` / `--amilia-password` to use other credentials instead; either
+one left out is still read from its secret.
 
 **Updating existing events.** By default an occurrence that already has an event is left alone.
 `--update-existing` also reads each existing Activity event and patches only the fields that
-differ from Amilia (title, times, location, description, Amilia tags), e.g. to add locations to
+differ from Amilia (title, times, location, colour, description, Amilia tags), e.g. to add locations to
 events created before they were synced. It **never deletes or recreates** an event: a missing or
 cancelled one is reported and left alone, and hidden Activities and offline Programs are skipped.
 Hand edits to those fields on the calendar are overwritten, so always preview first:
