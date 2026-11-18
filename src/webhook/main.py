@@ -97,7 +97,7 @@ Deploy:
     --env-vars-file=env.yaml \
     --set-secrets="GOOGLE_CALENDAR_ID=google-calendar-id:latest,AMILIA_WEBHOOK_TOKEN=amilia-webhook-token:latest,AMILIA_API_USERNAME=amilia-api-username:latest,AMILIA_API_PASSWORD=amilia-api-password:latest"
 
-  See README.md "Background webhook processing" for the first-rollout order.
+  See README.md "First rollout order".
 
 Amilia webhook contract (see /apidocs/ApiDocs/v1webhooks.html):
   POST body: { "OrganizationId", "Context", "Action", "Name", "EventTime", "Payload": {...} }
