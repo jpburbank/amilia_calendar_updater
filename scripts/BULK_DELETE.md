@@ -39,7 +39,7 @@ store namespaces documents by context in the first place — see the
 ## Running it
 
 Impersonate the function's own service account, same as `scripts/backfill.py` (`$SA_EMAIL`: see
-"Deployment variables" in the README):
+"Deployment variables" in docs/operations.md):
 
 ```
 gcloud auth application-default login \
