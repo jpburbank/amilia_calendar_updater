@@ -41,7 +41,7 @@ as backfill.py:
       PYTHONPATH=src .venv/bin/python scripts/bulk_delete.py \
       --context Activity --program-id 107638
 
-See scripts/BULK_DELETE.md for full usage and examples.
+See docs/bulk-delete.md for full usage and examples.
 """
 
 from __future__ import annotations
