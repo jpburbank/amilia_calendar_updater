@@ -4,6 +4,7 @@ import argparse
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from googleapiclient.errors import HttpError
 
 from bulk_delete import (
     build_arg_parser,
@@ -15,14 +16,24 @@ from bulk_delete import (
 )
 
 
+class _Resp(dict):
+    def __init__(self, status):
+        super().__init__(status=str(status))
+        self.status = status
+        self.reason = ""
+
+
 class _FakeCalendarClient:
-    def __init__(self, fail_ids=None):
+    def __init__(self, fail_ids=None, http_status_by_id=None):
         self.delete_calls = []
         self._fail_ids = set(fail_ids or [])
+        self._http_status_by_id = dict(http_status_by_id or {})
 
     def delete_event(self, event_id):
         if event_id in self._fail_ids:
             raise RuntimeError(f"boom: {event_id}")
+        if event_id in self._http_status_by_id:
+            raise HttpError(_Resp(self._http_status_by_id[event_id]), b"{}")
         self.delete_calls.append(event_id)
 
 
@@ -209,6 +220,29 @@ def test_delete_one_records_calendar_failures_without_raising():
 
     assert result["calendar_failed"] == [("evt_1", "boom: evt_1")]
     assert result["store_deleted"] is True  # store deletion still proceeds
+
+
+@pytest.mark.parametrize("status", [404, 410])
+def test_delete_one_treats_an_already_gone_event_as_done_not_failed(status):
+    calendar_client = _FakeCalendarClient(http_status_by_id={"evt_1": status})
+    store = _FakeEventStore(
+        documents={("Activity", "111"): {"occurrences": {"a": {"calendar_event_id": "evt_1"}}}}
+    )
+
+    result = delete_one(calendar_client, store, "Activity", "111", target="both")
+
+    assert (result["calendar_already_gone"], result["calendar_failed"]) == (["evt_1"], [])
+
+
+def test_delete_one_still_fails_on_other_calendar_http_errors():
+    calendar_client = _FakeCalendarClient(http_status_by_id={"evt_1": 403})
+    store = _FakeEventStore(
+        documents={("Activity", "111"): {"occurrences": {"a": {"calendar_event_id": "evt_1"}}}}
+    )
+
+    result = delete_one(calendar_client, store, "Activity", "111", target="both")
+
+    assert [event_id for event_id, _ in result["calendar_failed"]] == ["evt_1"]
 
 
 def test_delete_one_on_missing_document_is_a_noop_not_an_error():

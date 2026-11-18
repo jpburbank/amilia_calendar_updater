@@ -56,7 +56,7 @@ Otherwise fix the cause the entry names (for example the calendar not being shar
 
 - **A Create or Update:** make any small edit to the Activity in Amilia to send a fresh webhook,
   or run the [backfill](#backfill) with `--update-existing`.
-- **A Delete:** remove the Activity's events with [bulk delete](#bulk-delete)
+- **A Delete:** remove the Activity's events with [bulk delete](bulk-delete.md)
   (`--context Activity --id <Activity Id>`).
 
 ### Rotate the webhook token
@@ -254,4 +254,4 @@ deliberately cautious:
 - stops past `--limit` documents;
 - writes an audit log to `audit_logs/`.
 
-See [`scripts/BULK_DELETE.md`](../scripts/BULK_DELETE.md).
+See [`bulk-delete.md`](bulk-delete.md) for how to run it, examples, and what to do afterwards.
