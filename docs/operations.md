@@ -4,6 +4,80 @@ Setting up, deploying and running the Amilia Calendar Updater. For what the syst
 [README](../README.md).
 
 
+## Common tasks
+
+### Change a room colour, add a room, or change the building address
+
+1. Edit `src/shared/constants.py`. Colours must be one of the 11 names in
+   `GOOGLE_EVENT_COLOUR_IDS`; a test fails otherwise.
+2. Run the tests (see [`development.md`](development.md)), then [deploy](#deploying) all three
+   functions.
+3. New and updated events use the change straight away. To apply it to existing events, run the
+   [backfill](#backfill) with `--update-existing --dry-run`, check the preview, then again without
+   `--dry-run`.
+
+### Find out why an event didn't update
+
+Every webhook leaves a `status=` line in Cloud Logging. List the last day's:
+
+```
+gcloud logging read 'resource.labels.service_name=("amilia-calendar-updater" OR "amilia-webhook-worker") AND textPayload:"status="' \
+  --freshness=1d --format='value(timestamp,textPayload)'
+```
+
+| Status | Meaning |
+|---|---|
+| `rejected` | Wrong or missing `?token=`, or not a POST. The webhook URL in Amilia is wrong |
+| `ignored` | A FacilityBooking webhook, while FacilityBooking sync is off |
+| `queued` | Received; the worker's line follows within seconds |
+| `skipped reason=stale event` | An older redelivery of a change already applied |
+| `skipped reason=deleted in Amilia` / `archived in Amilia` | Amilia says the record no longer exists or is archived |
+| `skipped reason=no stored activity` | An Update or Delete for an Activity never synced. Run the backfill |
+| `retrying` | A temporary failure; it will be retried |
+| `discarded` | Given up. See [Redo a discarded webhook](#redo-a-discarded-webhook) |
+| `ok` | Applied |
+
+If the line says `ok` but the event still looks wrong, check the Activity in Amilia: a Hidden
+Activity, or one in an offline Program, has its events removed.
+
+The status lines name the action but not the Activity, so match webhooks by time.
+
+### Redo a discarded webhook
+
+A discarded webhook's ERROR log entry holds the full webhook JSON:
+
+```
+gcloud logging read 'resource.labels.service_name="amilia-webhook-worker" AND textPayload:"status=discarded"' \
+  --freshness=7d --format='value(timestamp,textPayload)'
+```
+
+Entries whose webhook is `{"smoke_test": …}` are deliberate post-deploy checks; ignore them.
+Otherwise fix the cause the entry names (for example the calendar not being shared), then:
+
+- **A Create or Update:** make any small edit to the Activity in Amilia to send a fresh webhook,
+  or run the [backfill](#backfill) with `--update-existing`.
+- **A Delete:** remove the Activity's events with [bulk delete](#bulk-delete)
+  (`--context Activity --id <Activity Id>`).
+
+### Rotate the webhook token
+
+Do steps 2 and 3 close together: webhooks are rejected between them.
+
+1. In `amilia_calendar_updater_gcp_resources`, generate a new token:
+   `terraform apply -replace=random_password.amilia_webhook_token`. This replaces the secret's
+   version, so the old token stops working once the functions restart.
+2. Redeploy `amilia-calendar-updater` and `amilia-webhook-worker` ([CLI](#cli)).
+3. Update the `?token=` on every Amilia webhook URL, using the value from
+   [Webhook token](#webhook-token).
+
+Never share the webhook URL with its `?token=` part. See
+[`security-notes.md`](security-notes.md).
+
+### Switch to another calendar
+
+See [Target calendar](#target-calendar).
+
+
 ## Setup
 
 ### Deployment variables

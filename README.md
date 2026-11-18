@@ -25,6 +25,19 @@ Amilia webhook ──► amilia-calendar-updater ──► queue ──► amili
   Amilia occurrence.
 
 
+## Common tasks
+
+| I want to… | See |
+|---|---|
+| Change a room's colour, add a room, or change the building address | [Edit `src/shared/constants.py`](docs/operations.md#change-a-room-colour-add-a-room-or-change-the-building-address) |
+| Find out why an event didn't update | [Reading the logs](docs/operations.md#find-out-why-an-event-didnt-update) |
+| Redo a webhook that was given up on | [Redo a discarded webhook](docs/operations.md#redo-a-discarded-webhook) |
+| Rotate the webhook token | [Rotate the webhook token](docs/operations.md#rotate-the-webhook-token) |
+| Switch to another calendar (e.g. production) | [Target calendar](docs/operations.md#target-calendar) |
+| Deploy a change | [Deploying](docs/operations.md#deploying) |
+| Load or fix events in bulk | [Backfill](docs/operations.md#backfill) |
+
+
 ## What gets synced
 
 Amilia **Programs**, **Activities**, and each Activity's **occurrences**. Each occurrence (session)
