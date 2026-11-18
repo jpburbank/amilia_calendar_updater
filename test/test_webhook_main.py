@@ -476,3 +476,46 @@ def test_is_final_attempt(enqueued_at, expected):
 
 def test_is_final_attempt_treats_unreadable_time_as_final():
     assert webhook_main._is_final_attempt("not-a-time") is True
+
+
+# ---------------------------------------------------------------------------
+# Status lines name the Amilia record
+# ---------------------------------------------------------------------------
+
+
+def test_queued_status_line_names_the_activity(caplog, monkeypatch):
+    monkeypatch.setitem(webhook_main.HANDLERS, "Activity", lambda **kw: {})
+    with caplog.at_level(logging.DEBUG):
+        call(json_body=_activity_webhook())
+
+    assert caplog.records[-1].getMessage() == (
+        "status=queued context=Activity action=Update amilia_id=7482865 organization_id=17659"
+    )
+
+
+def test_worker_status_line_names_a_facility_bookings_reservation(caplog, monkeypatch):
+    def handler(**kw):
+        return {"calendar_event_id": "evt_abc"}
+
+    webhook = {**booking(), "Payload": {"ReservationId": "FB-1"}}
+    with caplog.at_level(logging.DEBUG):
+        call_worker(webhook, handler=handler, monkeypatch=monkeypatch)
+
+    assert "amilia_id=FB-1" in caplog.records[-1].getMessage()
+
+
+def test_skipped_status_line_names_the_activity(caplog, monkeypatch):
+    monkeypatch.setitem(webhook_main.HANDLERS, "Activity", lambda **kw: {"skipped": "stale event"})
+    with caplog.at_level(logging.DEBUG):
+        call_worker(_activity_webhook())
+
+    message = caplog.records[-1].getMessage()
+    assert "amilia_id=7482865" in message
+    assert "reason=stale event" in message
+
+
+def test_status_line_without_a_payload_id_omits_it(caplog):
+    with caplog.at_level(logging.DEBUG):
+        call(json_body={"OrganizationId": 1, "Context": "Registration", "Action": "Create"})
+
+    assert "amilia_id" not in caplog.records[-1].getMessage()

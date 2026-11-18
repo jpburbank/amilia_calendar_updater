@@ -40,7 +40,10 @@ gcloud logging read 'resource.labels.service_name=("amilia-calendar-updater" OR 
 If the line says `ok` but the event still looks wrong, check the Activity in Amilia: a Hidden
 Activity, or one in an offline Program, has its events removed.
 
-The status lines name the action but not the Activity, so match webhooks by time.
+Each line names the Amilia record as `amilia_id` (the Activity or Program `Id`, or a
+FacilityBooking's `ReservationId`), e.g.
+`status=skipped context=Activity action=Update amilia_id=7493601 reason=stale event`. To see one
+Activity's history, add `AND textPayload:"amilia_id=7493601"` to the query above.
 
 ### Redo a discarded webhook
 
