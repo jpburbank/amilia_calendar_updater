@@ -1,10 +1,14 @@
 """Tests for the standalone backfill script's core logic."""
 
+import argparse
+import base64
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
+import backfill
 from backfill import (
+    amilia_credentials,
     backfill_activity,
     backfill_facility_booking,
     backfill_facility_bookings,
@@ -601,3 +605,90 @@ def test_backfill_stores_the_description_for_the_reconciler():
     )
 
     assert event_store.get("Activity", 7311901)["description"] == "<p>About.</p>"
+
+
+class _FakeSecretResponse:
+    def __init__(self, status_code, data=None):
+        self.status_code = status_code
+        self.text = "denied" if status_code != 200 else ""
+        self._data = data
+
+    def json(self):
+        return {"payload": {"data": base64.b64encode(self._data.encode()).decode()}}
+
+
+class _FakeSecretSession:
+    def __init__(self, secrets, status_code=200):
+        self.secrets = secrets
+        self.status_code = status_code
+        self.urls = []
+
+    def get(self, url):
+        self.urls.append(url)
+        name = url.split("/secrets/")[1].split("/")[0]
+        return _FakeSecretResponse(self.status_code, self.secrets.get(name))
+
+
+def _credential_args(username=None, password=None, gcp_project=None):
+    return argparse.Namespace(
+        amilia_username=username, amilia_password=password, gcp_project=gcp_project
+    )
+
+
+@pytest.fixture
+def _default_credentials(monkeypatch):
+    monkeypatch.setattr(backfill.google.auth, "default", lambda scopes: ("creds", "adc-project"))
+
+
+def test_amilia_credentials_from_the_command_line_skip_secret_manager():
+    def no_session(_credentials):
+        raise AssertionError("Secret Manager should not be used")
+
+    args = _credential_args("user", "pass")
+
+    assert amilia_credentials(args, session_factory=no_session) == ("user", "pass")
+
+
+def test_amilia_credentials_default_to_secret_manager(_default_credentials):
+    session = _FakeSecretSession({"amilia-api-username": "u", "amilia-api-password": "p"})
+
+    result = amilia_credentials(_credential_args(), session_factory=lambda _: session)
+
+    assert result == ("u", "p")
+    assert session.urls[0] == (
+        "https://secretmanager.googleapis.com/v1/projects/adc-project/secrets/"
+        "amilia-api-username/versions/latest:access"
+    )
+
+
+def test_amilia_credentials_only_read_the_missing_secret(_default_credentials):
+    session = _FakeSecretSession({"amilia-api-password": "p"})
+
+    result = amilia_credentials(
+        _credential_args(username="user"), session_factory=lambda _: session
+    )
+
+    assert result == ("user", "p")
+    assert len(session.urls) == 1
+
+
+def test_amilia_credentials_use_gcp_project_over_the_default(_default_credentials):
+    session = _FakeSecretSession({"amilia-api-username": "u", "amilia-api-password": "p"})
+
+    amilia_credentials(_credential_args(gcp_project="other"), session_factory=lambda _: session)
+
+    assert "/projects/other/" in session.urls[0]
+
+
+def test_amilia_credentials_fail_clearly_without_a_project(monkeypatch):
+    monkeypatch.setattr(backfill.google.auth, "default", lambda scopes: ("creds", None))
+
+    with pytest.raises(RuntimeError, match="--gcp-project"):
+        amilia_credentials(_credential_args(), session_factory=lambda _: None)
+
+
+def test_amilia_credentials_fail_clearly_when_a_secret_is_unreadable(_default_credentials):
+    session = _FakeSecretSession({}, status_code=403)
+
+    with pytest.raises(RuntimeError, match="amilia-api-username.*HTTP 403"):
+        amilia_credentials(_credential_args(), session_factory=lambda _: session)
