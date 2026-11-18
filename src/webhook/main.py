@@ -64,7 +64,7 @@ Deploy:
   # The target calendar ID is the google-calendar-id secret (also from the
   # Terraform project; the value is set by hand), not an env.yaml entry, so
   # switching dev/prod calendars is a new secret version plus a redeploy.
-  # See README.md "Target calendar".
+  # See docs/operations.md "Target calendar".
 
   # FacilityBooking sync is off unless env.yaml sets
   # FACILITY_BOOKING_SYNC_ENABLED: "true" — see shared/feature_flags.py.
@@ -97,7 +97,7 @@ Deploy:
     --env-vars-file=env.yaml \
     --set-secrets="GOOGLE_CALENDAR_ID=google-calendar-id:latest,AMILIA_WEBHOOK_TOKEN=amilia-webhook-token:latest,AMILIA_API_USERNAME=amilia-api-username:latest,AMILIA_API_PASSWORD=amilia-api-password:latest"
 
-  See README.md "First rollout order".
+  See docs/operations.md "First rollout order".
 
 Amilia webhook contract (see /apidocs/ApiDocs/v1webhooks.html):
   POST body: { "OrganizationId", "Context", "Action", "Name", "EventTime", "Payload": {...} }

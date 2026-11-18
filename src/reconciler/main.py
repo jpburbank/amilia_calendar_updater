@@ -46,7 +46,7 @@ Deploy (from the repo root):
     --set-secrets="GOOGLE_CALENDAR_ID=google-calendar-id:latest"
 
 GOOGLE_CALENDAR_ID comes from the google-calendar-id secret, the same one
-the webhook function mounts. See README.md "Target calendar".
+the webhook function mounts. See docs/operations.md "Target calendar".
 """
 
 from __future__ import annotations
