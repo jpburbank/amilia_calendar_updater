@@ -39,6 +39,13 @@ room; the address is what lets Google Calendar link to Google Maps. Records stor
 Events created earlier keep their old location until their Activity is next updated or the
 backfill runs with `--update-existing`. See `src/shared/locations.py`.
 
+**Event colours come from the room.** Each Activity event gets one of Google Calendar's 11 event
+colours based on its room (e.g. Pottery Studio → Tangerine, Wood shop → Banana); a room not in
+the list, or no room, gets the calendar's default colour. Room names match ignoring case and
+spacing. **The room-to-colour list and the building address live in `src/shared/constants.py`**
+— edit them there. As with locations, existing events change on their Activity's next update or
+a `--update-existing` backfill.
+
 **Activity dates come from REST.** The Activity webhook's `StartDate`/`EndDate` carry the wrong
 UTC offset (Pacific times labelled `-04:00`, then `-05:00`), so the stored `start_date`/`end_date`,
 and the record's retention `custom_time`, use the REST Activity's values. The webhook's are only a
@@ -275,7 +282,8 @@ Two separately deployed Cloud Functions, each its own self-contained directory:
 
 ```
 src/
-  shared/       amilia_client.py, calendar_client.py, event_store.py, activities.py, … — the
+  shared/       constants.py (building address, location colours), amilia_client.py,
+                calendar_client.py, event_store.py, activities.py, … — the
                 single source of truth for the functions and scripts/backfill.py
   webhook/      main.py (amilia_webhook, process_webhook_task) + handlers.py, reconcile_queue.py,
                 webhook_queue.py, retry_policy.py

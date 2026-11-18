@@ -540,12 +540,14 @@ def test_update_existing_patches_only_the_fields_that_differ():
 
     _backfill(calendar_client, _tracked_store(), update_existing=True)
 
-    assert calendar_client.update_calls == [("evt_old", {"location": _WOOD_SHOP_LOCATION})]
+    assert calendar_client.update_calls == [
+        ("evt_old", {"location": _WOOD_SHOP_LOCATION, "color_id": "5"})
+    ]
 
 
 def test_update_existing_leaves_matching_events_unpatched():
     calendar_client = _FakeCalendarClient(
-        events={"evt_old": _calendar_event(location=_WOOD_SHOP_LOCATION)}
+        events={"evt_old": _calendar_event(location=_WOOD_SHOP_LOCATION, colorId="5")}
     )
 
     _backfill(calendar_client, _tracked_store(), update_existing=True)
