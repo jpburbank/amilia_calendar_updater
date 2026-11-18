@@ -302,7 +302,7 @@ def _respond(status: str, http_status: int, *, result=None, exc_info=False, **fi
     Build the response and log it, together, so the two can't drift.
 
     Emits one `key=value` line per request, e.g.
-        status=skipped context=FacilityBooking action=Update reason=no stored event mapping
+        status=skipped context=Activity action=Update amilia_id=7493601 reason=stale event
     which Cloud Logging filters as jsonPayload.message:"status=skipped".
     """
     fields = {"status": status, **{k: v for k, v in fields.items() if v is not None}}
@@ -316,6 +316,23 @@ def _respond(status: str, http_status: int, *, result=None, exc_info=False, **fi
     if result is not None:
         body["result"] = result
     return jsonify(body), http_status
+
+
+def _webhook_fields(body: dict) -> dict:
+    """
+    What every status line says about a webhook: its context and action,
+    and which Amilia record it's about (an Activity or Program Id, or a
+    FacilityBooking ReservationId), so a log line can be traced to the
+    record without logging the payload itself.
+    """
+    payload = body.get("Payload")
+    payload = payload if isinstance(payload, dict) else {}
+    return {
+        "context": body.get("Context"),
+        "action": body.get("Action"),
+        "amilia_id": payload.get("Id") or payload.get("ReservationId"),
+        "organization_id": body.get("OrganizationId"),
+    }
 
 
 @functions_framework.http
@@ -347,7 +364,7 @@ def amilia_webhook(request: Request):
     logger.info("Received %s %s (OrganizationId=%s)", context, action, org_id)
 
     if HANDLERS.get(context) is None:
-        return _respond("ignored", 200, context=context, organization_id=org_id)
+        return _respond("ignored", 200, **_webhook_fields(body))
 
     try:
         _get_webhook_queue().enqueue_webhook(body)
@@ -357,7 +374,7 @@ def amilia_webhook(request: Request):
         logger.warning("could not enqueue webhook; processing inline", exc_info=True)
         return _process_inline(body)
 
-    return _respond("queued", 200, context=context, action=action, organization_id=org_id)
+    return _respond("queued", 200, **_webhook_fields(body))
 
 
 @functions_framework.http
@@ -387,7 +404,7 @@ def process_webhook_task(request: Request):
 
     if HANDLERS.get(context) is None:
         # Routing changed between enqueue and now (e.g. a flag flipped).
-        return _respond("ignored", 200, context=context, organization_id=org_id)
+        return _respond("ignored", 200, **_webhook_fields(body))
 
     try:
         result = _run_handler(body, fail_open=final_attempt)
@@ -400,13 +417,11 @@ def process_webhook_task(request: Request):
             "retrying",
             503,
             exc_info=True,
-            context=context,
-            action=action,
-            organization_id=org_id,
+            **_webhook_fields(body),
             attempt=attempt,
             error=type(exc).__name__,
         )
-    return _result_response(context, action, org_id, result)
+    return _result_response(body, result)
 
 
 def _is_final_attempt(enqueued_at: str | None, now: datetime | None = None) -> bool:
@@ -438,14 +453,11 @@ def _run_handler(body: dict, *, fail_open: bool) -> dict:
 
 
 def _process_inline(body: dict):
-    context = body.get("Context")
-    action = body.get("Action")
-    org_id = body.get("OrganizationId")
     try:
         result = _run_handler(body, fail_open=True)
     except Exception as exc:
-        return _failure_response(context, action, org_id, exc)
-    return _result_response(context, action, org_id, result)
+        return _failure_response(body, exc)
+    return _result_response(body, result)
 
 
 def _discard(data: dict, exc: Exception | None, *, attempt, reason: str):
@@ -458,9 +470,7 @@ def _discard(data: dict, exc: Exception | None, *, attempt, reason: str):
         "discarded",
         200,
         exc_info=exc is not None,
-        context=data.get("Context"),
-        action=data.get("Action"),
-        organization_id=data.get("OrganizationId"),
+        **_webhook_fields(data),
         reason=reason,
         attempt=attempt,
         error=type(exc).__name__ if exc else None,
@@ -468,7 +478,7 @@ def _discard(data: dict, exc: Exception | None, *, attempt, reason: str):
     )
 
 
-def _result_response(context: str, action: str, org_id, result: dict):
+def _result_response(body: dict, result: dict):
     if "skipped" in result:
         # The handler ran cleanly but nothing reached the calendar — e.g. an
         # Update/Delete for a booking with no stored event mapping. Must not
@@ -476,9 +486,7 @@ def _result_response(context: str, action: str, org_id, result: dict):
         return _respond(
             "skipped",
             200,
-            context=context,
-            action=action,
-            organization_id=org_id,
+            **_webhook_fields(body),
             reason=result["skipped"],
             result=result,
         )
@@ -486,15 +494,13 @@ def _result_response(context: str, action: str, org_id, result: dict):
     return _respond(
         "ok",
         200,
-        context=context,
-        action=action,
-        organization_id=org_id,
+        **_webhook_fields(body),
         calendar_event_id=result.get("calendar_event_id"),
         result=result,
     )
 
 
-def _failure_response(context: str, action: str, org_id, exc: Exception):
+def _failure_response(body: dict, exc: Exception):
     """
     Always ack with 200: a redelivery of the identical request would fail
     identically, and 72h of retries costs the whole Amilia subscription.
@@ -505,9 +511,7 @@ def _failure_response(context: str, action: str, org_id, exc: Exception):
         "dropped",
         200,
         exc_info=True,
-        context=context,
-        action=action,
-        organization_id=org_id,
+        **_webhook_fields(body),
         error=type(exc).__name__,
         google_status=getattr(getattr(exc, "resp", None), "status", None),
     )
