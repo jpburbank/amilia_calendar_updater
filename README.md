@@ -8,12 +8,18 @@ Open security issues are tracked in [`docs/security-notes.md`](docs/security-not
 
 ## How it works
 
-```
-Amilia webhook ──► amilia-calendar-updater ──► queue ──► amilia-webhook-worker ──► Google Calendar
-                   (public: checks token,                (private: does the sync)    + event store
-                    queues, replies in ms)                       │
-                                                                 └─► amilia-activity-reconciler
-                                                                     (when a Program goes online/offline)
+```mermaid
+flowchart LR
+    A[Amilia] -- webhook --> U["amilia-calendar-updater<br/>public: checks the token"]
+    U --> Q1[(webhook queue)]
+    Q1 --> W["amilia-webhook-worker<br/>does the sync"]
+    W -- current state, occurrences --> A
+    W --> C[Google Calendar]
+    W --> S[(event store)]
+    W -- Program went online/offline --> Q2[(reconcile queue)]
+    Q2 --> R["amilia-activity-reconciler<br/>one task per Activity"]
+    R --> C
+    R --> S
 ```
 
 - **Three Cloud Functions.** `amilia-calendar-updater` receives Amilia's webhooks,
