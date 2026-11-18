@@ -1,5 +1,9 @@
 # GCS-backed event-ID mapping store
 
+> **Archived.** This plan was implemented; the bucket is now managed by Terraform in
+> `amilia_calendar_updater_gcp_resources` (`storage.tf`). Kept for its design reasoning. For
+> current instructions see [`../operations.md`](../operations.md).
+
 > **Update (post-implementation):** the bucket, its IAM binding, and its retention lifecycle rule described below as manual `gcloud` commands / a checked-in `lifecycle.json` were superseded by Terraform, managed in the sibling `amilia_calendar_updater_gcp_resources` project (`storage.tf`). The design rationale below (object naming, granularity, Custom-Time-based retention) is unchanged — only how the bucket is provisioned moved.
 
 ## Context
