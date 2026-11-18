@@ -44,7 +44,13 @@ path production does — see scripts/check_access.py for why):
     GOOGLE_CALENDAR_ID=$(gcloud secrets versions access latest --secret=google-calendar-id) \
     GOOGLE_EVENT_STORE_BUCKET=... \
       PYTHONPATH=src .venv/bin/python scripts/backfill.py \
-      --org-id <ORG_ID> --amilia-username <user> --amilia-password <pass>
+      --org-id <ORG_ID>
+
+The Amilia API username and password are read from the amilia-api-username /
+amilia-api-password secrets (the same ones the functions use), as the
+impersonated service account, in gcloud's configured project
+(--gcp-project to override). Pass --amilia-username / --amilia-password to
+use other credentials instead.
 
 Add --dry-run first to preview what would happen without writing anything.
 
@@ -86,6 +92,7 @@ own event and a second "<name> booking" event from this path).
 from __future__ import annotations
 
 import argparse
+import base64
 import os
 import sys
 import time
@@ -103,6 +110,11 @@ from shared.titles import clean_title
 
 REQUEST_PACING_SECONDS = 0.2  # be gentle on Amilia's API
 
+# The same Secret Manager secrets the deployed functions mount via --set-secrets.
+AMILIA_USERNAME_SECRET = "amilia-api-username"
+AMILIA_PASSWORD_SECRET = "amilia-api-password"
+_SECRET_URL = "https://secretmanager.googleapis.com/v1/projects/{project}/secrets/{name}/versions/latest:access"
+
 
 def _identity() -> str:
     """Best-effort email for whoever we authenticated to GCP as."""
@@ -112,6 +124,42 @@ def _identity() -> str:
         credentials.refresh(google.auth.transport.requests.Request())
         email = getattr(credentials, "service_account_email", None)
     return email or "<not a service account — probably your user account>"
+
+
+def read_secret(session, project: str, name: str) -> str:
+    """The latest version of a Secret Manager secret, as text."""
+    response = session.get(_SECRET_URL.format(project=project, name=name))
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"Couldn't read secret {name!r} in project {project!r}: "
+            f"HTTP {response.status_code} {response.text[:200]}"
+        )
+    return base64.b64decode(response.json()["payload"]["data"]).decode()
+
+
+def amilia_credentials(args, session_factory=None) -> tuple[str, str]:
+    """
+    The Amilia API username and password: from --amilia-username /
+    --amilia-password when given, otherwise from Secret Manager (as whoever
+    the GCP credentials are — normally the impersonated service account),
+    in --gcp-project or the credentials' default project.
+    """
+    username, password = args.amilia_username, args.amilia_password
+    if username and password:
+        return username, password
+    credentials, default_project = google.auth.default(
+        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+    )
+    project = args.gcp_project or default_project
+    if not project:
+        raise RuntimeError("No GCP project for Secret Manager: pass --gcp-project")
+    session = (session_factory or google.auth.transport.requests.AuthorizedSession)(credentials)
+    if not username:
+        username = read_secret(session, project, AMILIA_USERNAME_SECRET)
+    if not password:
+        password = read_secret(session, project, AMILIA_PASSWORD_SECRET)
+    print(f"Amilia credentials: from Secret Manager in project {project}")
+    return username, password
 
 
 def program_is_online(program: dict) -> bool:
@@ -369,8 +417,19 @@ def backfill_facility_bookings(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--org-id", required=True, help="Amilia OrganizationId")
-    parser.add_argument("--amilia-username", required=True)
-    parser.add_argument("--amilia-password", required=True)
+    parser.add_argument(
+        "--amilia-username",
+        help=f"Amilia API username. Default: the {AMILIA_USERNAME_SECRET} secret.",
+    )
+    parser.add_argument(
+        "--amilia-password",
+        help=f"Amilia API password. Default: the {AMILIA_PASSWORD_SECRET} secret.",
+    )
+    parser.add_argument(
+        "--gcp-project",
+        help="Project holding the Amilia secrets. Default: the GCP credentials' project "
+        "(e.g. gcloud's configured project).",
+    )
     parser.add_argument(
         "--lookback-days",
         type=int,
@@ -389,9 +448,9 @@ def main() -> int:
     parser.add_argument(
         "--update-existing",
         action="store_true",
-        help="Also patch existing Activity events whose title, times, location, description or "
-        "Amilia tags differ from Amilia's. Never deletes or recreates an event. With --dry-run, "
-        "prints each change without writing it.",
+        help="Also patch existing Activity events whose title, times, location, colour, "
+        "description or Amilia tags differ from Amilia's. Never deletes or recreates an "
+        "event. With --dry-run, prints each change without writing it.",
     )
     parser.add_argument(
         "--dry-run",
@@ -414,9 +473,12 @@ def main() -> int:
 
     calendar_client = CalendarClient(calendar_id=calendar_id)
     event_store = EventStore(bucket_name=bucket_name)
-    amilia = AmiliaClient(
-        args.amilia_username, args.amilia_password, pacing_seconds=REQUEST_PACING_SECONDS
-    )
+    try:
+        amilia_username, amilia_password = amilia_credentials(args)
+    except RuntimeError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+    amilia = AmiliaClient(amilia_username, amilia_password, pacing_seconds=REQUEST_PACING_SECONDS)
     cutoff = datetime.now(UTC) - timedelta(days=args.lookback_days)
 
     print("\nFetching programs...")
