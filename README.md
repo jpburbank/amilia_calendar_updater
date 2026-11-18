@@ -3,7 +3,8 @@
 Keeps a Google Calendar in sync with Create Makerspace's classes in Amilia. When an Activity is
 created, changed or deleted in Amilia, its calendar events follow within seconds.
 
-Open security issues are tracked in [`docs/security-notes.md`](docs/security-notes.md).
+Unfamiliar terms are in the [Glossary](#glossary). Open security issues are tracked in
+[`docs/security-notes.md`](docs/security-notes.md).
 
 
 ## How it works
@@ -138,6 +139,25 @@ Amilia redeliver. `amilia-webhook-worker`, called only by Cloud Tasks, does the 
 
 Find given-up webhooks in Cloud Logging with `jsonPayload.message:"status=discarded"` (or
 `textPayload:`). Emailing them is [issue #26](https://github.com/jpburbank/amilia_calendar_updater/issues/26).
+
+
+## Glossary
+
+| Term | Meaning here |
+|---|---|
+| **Program** | An Amilia container for Activities, e.g. "Classes and Workshops". Has no calendar event itself, but taking it offline hides all its Activities |
+| **Activity** | One class or workshop in Amilia, with one or more occurrences |
+| **Occurrence** | One session of an Activity, with its own date, time and room. Each is one calendar event |
+| **Room** | Amilia's location name for an occurrence (e.g. "Wood shop"); sets the event's colour |
+| **Hidden** | An Activity status in Amilia. Hidden Activities have no calendar events |
+| **FacilityBooking** | An Amilia booking of a space. Not synced unless the feature flag is on |
+| **Webhook** | The message Amilia sends when something changes |
+| **Stale webhook** | A webhook older than the last one applied to a record, usually a redelivery. Skipped |
+| **Discarded webhook** | One the worker gave up on, logged in full so it can be redone |
+| **Event store** | The Cloud Storage bucket holding one record per Program, Activity or FacilityBooking, including which calendar event belongs to each occurrence |
+| **Reconciler** | The function that adds or removes an Activity's events when its Program goes online or offline |
+| **Backfill** | The script that loads what already exists in Amilia, and can correct existing events |
+| **Hidden tags** | Data on each calendar event naming its Amilia record. Not shown in the Calendar UI |
 
 
 ## More documentation
