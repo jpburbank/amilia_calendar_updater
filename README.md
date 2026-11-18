@@ -54,7 +54,7 @@ occurrence.
 
 **One definition of an Activity's record and events.** `src/shared/activities.py` builds the
 stored Activity record (name, Program, category, status, dates, description, location, and each
-occurrence's start/end/location) and the calendar event fields (title, times, location,
+occurrence's start/end/location) and the calendar event fields (title, times, location, colour,
 description, Amilia tags). The webhook handler, the reconciler and the backfill all use it, so
 they write the same thing. The handler builds both from the REST Activity; the webhook payload is
 only the fallback when that fetch fails. Because the record holds the description, events the
@@ -85,7 +85,7 @@ That's one extra REST call per Activity webhook and per (rare) Program webhook. 
 
 ## Deployment
 
-If changes have been made or for some other reason the Cloud Function needs to be redeployed, and have passed tests, do the following.
+To redeploy after a change has passed tests, do the following. There are three Cloud Functions; see [CLI](#cli).
 
 ### Deployment variables
 Every command in this README uses shell variables instead of real project values, so nothing
@@ -171,7 +171,7 @@ set by hand. To switch:
    printf '%s' '<calendar-id>@group.calendar.google.com' | \
      gcloud secrets versions add google-calendar-id --data-file=-
    ```
-3. Redeploy **both** functions (commands under [CLI](#cli)). Secrets mounted as env vars are
+3. Redeploy **all three** functions (commands under [CLI](#cli)). Secrets mounted as env vars are
    read when an instance starts, so a redeploy is what guarantees every instance switches.
 4. **Reset the event store.** Its documents hold calendar event IDs from the *old* calendar,
    so an Update or Delete would target events that don't exist on the new one. Clear the
@@ -206,8 +206,9 @@ invoker IAM binding to succeed** (see `tasks.tf`'s comment) — deploy it, then 
 
 ### Backfill (Program/Activity/FacilityBooking sync)
 Webhooks only deliver *changes* — anything created in Amilia before the corresponding webhook
-subscription existed will never get a `Create` webhook. `scripts/backfill.py` is a one-time,
-standalone bulk loader that seeds the event store (and creates matching calendar events) for:
+subscription existed will never get a `Create` webhook. `scripts/backfill.py` is a standalone
+bulk loader, run once before relying on live sync (and again with `--update-existing` to
+correct existing events), that seeds the event store (and creates matching calendar events) for:
 - every Program,
 - every Activity whose last occurrence hasn't ended more than `--lookback-days` (default 30) in
   the past — no forward bound, so anything upcoming is always included, and
@@ -282,7 +283,7 @@ timestamped audit log under `audit_logs/` (gitignored) as it goes. Full usage
 and examples: [`scripts/BULK_DELETE.md`](scripts/BULK_DELETE.md).
 
 ### Source layout
-Two separately deployed Cloud Functions, each its own self-contained directory:
+Three Cloud Functions deployed from two source directories (the webhook and its worker share `src/webhook/`):
 
 ```
 src/
@@ -316,7 +317,7 @@ Skipping it fails in one of two ways:
 - **`shared/` doesn't exist yet** (fresh clone, or it was cleaned) → deploy fails at container
   startup with `ModuleNotFoundError: No module named 'shared'` (we hit this deploying the
   reconciler the first time).
-- **`shared/` exists but is stale** — if `src/shared/calendar_client.py` or `event_store.py`
+- **`shared/` exists but is stale** — if anything in `src/shared/`
   changes and you deploy without re-running `build.sh`, you silently ship the *old* shared code.
   No error, just wrong behavior.
 
