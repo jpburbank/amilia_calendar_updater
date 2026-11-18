@@ -1,6 +1,14 @@
 """Tests for picking an occurrence's calendar location."""
 
-from shared.locations import event_location, occurrence_location, schedule_location
+import pytest
+
+from shared.constants import GOOGLE_EVENT_COLOUR_IDS, LOCATION_COLOURS
+from shared.locations import (
+    event_colour_id,
+    event_location,
+    occurrence_location,
+    schedule_location,
+)
 
 # Shapes as returned live by Amilia's REST API on 2026-11-14.
 _OCCURRENCE = {"Id": 145865700, "Location": {"Id": 1923752, "Name": "Wood shop"}}
@@ -50,3 +58,20 @@ def test_event_location_puts_the_room_before_the_building_address():
 
 def test_event_location_without_a_room_is_just_the_building_address():
     assert event_location(None) == "39449 Queens Way #1, Squamish, BC V8B 0R5"
+
+
+def test_event_colour_id_maps_a_room_to_its_google_colour():
+    assert event_colour_id("Pottery Studio") == "6"  # Tangerine
+
+
+def test_event_colour_id_ignores_case_and_spacing():
+    assert event_colour_id("  wood   SHOP ") == "5"  # Banana
+
+
+@pytest.mark.parametrize("room", [None, "", "Rooftop"])
+def test_event_colour_id_is_none_for_no_room_or_an_unlisted_room(room):
+    assert event_colour_id(room) is None
+
+
+def test_every_location_colour_is_a_google_colour():
+    assert set(LOCATION_COLOURS.values()) <= set(GOOGLE_EVENT_COLOUR_IDS)

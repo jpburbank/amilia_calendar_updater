@@ -176,3 +176,27 @@ def test_logs_fetched_event(caplog):
         _client(_FakeEvents()).get_event("evt1")
 
     assert "operation=get event_id=evt1" in _response_lines(caplog)[0]
+
+
+def test_create_sends_color_id_as_colorid():
+    events = _FakeEvents()
+
+    _client(events).create_event(**_ARGS, color_id="6")
+
+    assert events.inserted[0]["colorId"] == "6"
+
+
+def test_create_without_color_id_leaves_the_default_colour():
+    events = _FakeEvents()
+
+    _client(events).create_event(**_ARGS)
+
+    assert "colorId" not in events.inserted[0]
+
+
+def test_update_with_no_color_id_resets_to_the_default_colour():
+    events = _FakeEvents()
+
+    _client(events).update_event("abc123", color_id=None)
+
+    assert events.patched == [("abc123", {"colorId": None})]

@@ -163,6 +163,7 @@ def event_changes(event: dict, fields: dict) -> dict:
         "end_iso": (event.get("end") or {}).get("dateTime"),
         "location": event.get("location"),
         "description": event.get("description"),
+        "color_id": event.get("colorId"),
         "extended_properties": (event.get("extendedProperties") or {}).get("private") or {},
     }
     changes = {}

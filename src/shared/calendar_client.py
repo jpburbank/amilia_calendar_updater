@@ -78,6 +78,7 @@ class CalendarClient:
         description: str | None = None,
         extended_properties: dict | None = None,
         event_id: str | None = None,
+        color_id: str | None = None,
     ) -> dict:
         """
         Creates an event and returns the created event resource (contains
@@ -108,6 +109,8 @@ class CalendarClient:
             body["location"] = location
         if description:
             body["description"] = description
+        if color_id:
+            body["colorId"] = color_id
         if extended_properties:
             body["extendedProperties"] = {"private": extended_properties}
         if event_id is None:
@@ -155,6 +158,8 @@ class CalendarClient:
             body["location"] = fields["location"]
         if "description" in fields:
             body["description"] = fields["description"]
+        if "color_id" in fields:
+            body["colorId"] = fields["color_id"]  # None resets to the calendar's default
         if "extended_properties" in fields:
             body["extendedProperties"] = {"private": fields["extended_properties"]}
 

@@ -177,6 +177,7 @@ def test_activity_event_fields_from_record_and_occurrence():
         "start_iso": "2027-01-01T09:30:00-07:00",
         "end_iso": "2027-01-01T12:30:00-07:00",
         "location": "Wood shop, 39449 Queens Way #1, Squamish, BC V8B 0R5",
+        "color_id": "5",
         "description": "<p>About the class.</p>",
         "extended_properties": {"amilia_type": "Activity", "amilia_type_id": "7485693"},
     }
@@ -189,8 +190,9 @@ def test_activity_event_fields_fall_back_to_record_location_and_default_title():
 
     fields = activity_event_fields(1, record, occurrence)
 
-    assert (fields["summary"], fields["location"], fields["description"]) == (
+    assert (fields["summary"], fields["location"], fields["color_id"], fields["description"]) == (
         "Activity",
         "Metal shop, 39449 Queens Way #1, Squamish, BC V8B 0R5",
+        "8",
         None,
     )
