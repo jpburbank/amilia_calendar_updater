@@ -28,15 +28,15 @@ GOOGLE_EVENT_COLOUR_IDS = {
 # Names match ignoring case and surrounding/repeated spaces. A room not
 # listed here (or no room) gets no colour: the calendar's default.
 LOCATION_COLOURS = {
-    "Pottery Studio": "Tangerine",
+    "Pottery Studio": "Basil",
     "Wood shop": "Banana",
     "Digital Fab Lab": "Blueberry",
-    "CNC router": "Basil",
-    "3D Printer": "Peacock",
-    "Metal shop": "Graphite",
-    "Laser": "Tomato",
-    "Textiles studio": "Grape",
-    "Event Space": "Flamingo",
-    "Create Makerspace": "Sage",
-    "Front Desk": "Lavender",
+    "CNC router": "Peacock",
+    "3D Printer": "Blueberry",
+    "Metal shop": "Tomato",
+    "Laser": "Blueberry",
+    "Textiles studio": "Lavender",
+    "Event Space": "Graphite",
+    "Create Makerspace": "Graphite",
+    "Front Desk": "Graphite",
 }

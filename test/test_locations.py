@@ -61,7 +61,7 @@ def test_event_location_without_a_room_is_just_the_building_address():
 
 
 def test_event_colour_id_maps_a_room_to_its_google_colour():
-    assert event_colour_id("Pottery Studio") == "6"  # Tangerine
+    assert event_colour_id("Pottery Studio") == "10"  # Basil
 
 
 def test_event_colour_id_ignores_case_and_spacing():
