@@ -70,7 +70,7 @@ it off leaves existing FacilityBooking events and records in place, no longer up
 | Title | The Activity's `Name`, trimmed of stray spaces (`Activity` if blank) |
 | Start / end | The occurrence's `Start` / `End` from Amilia's REST API |
 | Location | The occurrence's room, then the building address: `Wood shop, 39449 Queens Way #1, Squamish, BC V8B 0R5` |
-| Colour | Picked from the room (e.g. Pottery Studio → Tangerine); an unlisted room gets the default |
+| Colour | Picked from the room (e.g. Pottery Studio → Basil); an unlisted room gets the default |
 | Description | A **Book Now** link, then Description, Note, Prerequisite, Additional Information, Contact person |
 | Hidden tags | `amilia_type` and `amilia_type_id`, identifying the Amilia record |
 
