@@ -193,6 +193,6 @@ def test_activity_event_fields_fall_back_to_record_location_and_default_title():
     assert (fields["summary"], fields["location"], fields["color_id"], fields["description"]) == (
         "Activity",
         "Metal shop, 39449 Queens Way #1, Squamish, BC V8B 0R5",
-        "8",
+        "11",  # Metal shop: Tomato
         None,
     )

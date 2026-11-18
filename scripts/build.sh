@@ -5,7 +5,7 @@
 # named main.py from within it), so src/webhook/ and src/reconciler/ each
 # need their own physical copy of src/shared/ rather than reaching across
 # directories. Run this before every `gcloud functions deploy` — see
-# README.md and each function's own main.py docstring.
+# docs/operations.md and each function's own main.py docstring.
 #
 # The generated shared/ copies are gitignored: src/shared/ is the single
 # source of truth, these are just deploy-time artifacts.

@@ -41,7 +41,7 @@ as backfill.py:
       PYTHONPATH=src .venv/bin/python scripts/bulk_delete.py \
       --context Activity --program-id 107638
 
-See scripts/BULK_DELETE.md for full usage and examples.
+See docs/bulk-delete.md for full usage and examples.
 """
 
 from __future__ import annotations
@@ -54,6 +54,7 @@ from pathlib import Path
 
 import google.auth
 import google.auth.transport.requests
+from googleapiclient.errors import HttpError
 
 from shared.calendar_client import CalendarClient
 from shared.event_store import EventStore
@@ -134,11 +135,14 @@ def delete_one(
     """Deletes one document's requested target(s). Returns a result dict
     describing what happened, for logging/reporting — never raises for a
     calendar failure (recorded instead), so one bad event doesn't abort the
-    store deletion or the rest of the run."""
+    store deletion or the rest of the run. An event the calendar says is
+    already gone (404, or 410 for one deleted earlier) is the outcome we
+    wanted, so it's recorded as calendar_already_gone, not as a failure."""
     doc = event_store.get(context, external_id) or {}
     result = {
         "id": external_id,
         "calendar_deleted": [],
+        "calendar_already_gone": [],
         "calendar_failed": [],
         "store_deleted": False,
     }
@@ -148,6 +152,11 @@ def delete_one(
             try:
                 calendar_client.delete_event(event_id)
                 result["calendar_deleted"].append(event_id)
+            except HttpError as exc:
+                if exc.resp.status in (404, 410):
+                    result["calendar_already_gone"].append(event_id)
+                else:
+                    result["calendar_failed"].append((event_id, str(exc)))
             except Exception as exc:
                 result["calendar_failed"].append((event_id, str(exc)))
 
